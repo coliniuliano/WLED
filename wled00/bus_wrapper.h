@@ -231,7 +231,8 @@
 /*** ESP32 Neopixel methods ***/
 #ifdef ARDUINO_ARCH_ESP32
 //RGB
-#define B_32_RN_NEO_3 NeoPixelBusLg<NeoGrbFeature, NeoEsp32RmtNWs2812xMethod, NeoGammaNullMethod>
+//#define B_32_RN_NEO_3 NeoPixelBusLg<NeoGrbFeature, NeoEsp32RmtNWs2812xMethod, NeoGammaNullMethod>
+#define B_32_RN_NEO_3 NeoPixelBusLg<NeoGrbFeature, NeoEsp32LcdX16Ws2812xMethod, NeoGammaNullMethod>
 #define B_32_I0_NEO_3 NeoPixelBusLg<NeoGrbFeature, NeoEsp32I2s0Ws2812xMethod, NeoGammaNullMethod>
 #define B_32_I1_NEO_3 NeoPixelBusLg<NeoGrbFeature, NeoEsp32I2s1Ws2812xMethod, NeoGammaNullMethod>
 #define B_32_I1_NEO_3P NeoPixelBusLg<NeoGrbFeature, NeoEsp32I2s1X8Ws2812xMethod, NeoGammaNullMethod> // parallel I2S
@@ -542,7 +543,8 @@ class PolyBus {
     #endif
     #ifdef ARDUINO_ARCH_ESP32
       // RMT buses
-      case I_32_RN_NEO_3: busPtr = new B_32_RN_NEO_3(len, pins[0], (NeoBusChannel)channel); break;
+      // case I_32_RN_NEO_3: busPtr = new B_32_RN_NEO_3(len, pins[0], (NeoBusChannel)channel); break;
+      case I_32_RN_NEO_3: busPtr = new B_32_RN_NEO_3(len, pins[0]); break;
       case I_32_RN_NEO_4: busPtr = new B_32_RN_NEO_4(len, pins[0], (NeoBusChannel)channel); break;
       case I_32_RN_400_3: busPtr = new B_32_RN_400_3(len, pins[0], (NeoBusChannel)channel); break;
       case I_32_RN_TM1_4: busPtr = new B_32_RN_TM1_4(len, pins[0], (NeoBusChannel)channel); break;
@@ -1380,7 +1382,7 @@ class PolyBus {
       //if (num > 1) offset = 1; // I2S not supported yet (only 1 I2S)
       #elif defined(CONFIG_IDF_TARGET_ESP32S3)
       // On ESP32-S3 only the first 4 RMT channels are usable for transmitting
-      if (num > 3) return I_NONE;
+      if (num > 16) return I_NONE;
       //if (num > 3) offset = num -4; // I2S not supported yet
       #else
       // standard ESP32 has 8 RMT and 2 I2S channels

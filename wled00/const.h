@@ -63,9 +63,9 @@
       #define WLED_MAX_DIGITAL_CHANNELS 5
       //#define WLED_MAX_ANALOG_CHANNELS 8
       #define WLED_MIN_VIRTUAL_BUSSES 3
-    #elif defined(CONFIG_IDF_TARGET_ESP32S3)  // 4 RMT, 8 LEDC, has 2 I2S but NPB does not support them ATM
-      #define WLED_MAX_BUSSES 6               // will allow 4 digital & 2 analog RGB
-      #define WLED_MAX_DIGITAL_CHANNELS 4
+    #elif defined(CONFIG_IDF_TARGET_ESP32S3)  // 4 RMT, 8 LEDC, has 2 I2S but NPB does not support them ATM, 16 LCD
+      #define WLED_MAX_BUSSES 16               // will allow 4 digital & 2 analog RGB
+      #define WLED_MAX_DIGITAL_CHANNELS 16
       //#define WLED_MAX_ANALOG_CHANNELS 8
       #define WLED_MIN_VIRTUAL_BUSSES 4
     #else
