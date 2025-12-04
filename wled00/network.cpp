@@ -283,6 +283,10 @@ bool initEthernet()
   DEBUG_PRINTLN(F("initC: *** Ethernet successfully configured! ***"));
   return true;
   #endif // CONFIG_IDF_TARGET_ESP32S3
+
+  // Fallback: unsupported configuration
+  DEBUG_PRINTLN(F("initE: Unsupported Ethernet configuration"));
+  return false;
 }
 #endif
 

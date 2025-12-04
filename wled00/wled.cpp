@@ -866,7 +866,12 @@ void WLED::handleConnection()
   } else if (!interfacesInited) { //newly connected
     DEBUG_PRINTLN();
     DEBUG_PRINT(F("Connected! IP address: "));
-    DEBUG_PRINTLN(Network.localIP());
+    DEBUG_PRINT(Network.localIP());
+    if (Network.isEthernet()) {
+      DEBUG_PRINTLN(F(" via Ethernet"));
+    } else {
+      DEBUG_PRINTLN(F(" via WiFi"));
+    }
     if (improvActive) {
       if (improvError == 3) sendImprovStateResponse(0x00, true);
       sendImprovStateResponse(0x04);
