@@ -790,6 +790,10 @@ uint8_t realtimeBroadcast(uint8_t type, IPAddress client, uint16_t length, const
   switch (type) {
     case 0: // DDP
     {
+      #if defined(WLED_USE_ETHERNET) && !defined(ESP8266)
+      ddpUdp.begin(Network.localIP(), DDP_DEFAULT_PORT); // in case we have Ethernet on ESP32, this forces that source IP/routing.
+      #endif
+
       // calculate the number of UDP packets we need to send
       size_t channelCount = length * (isRGBW? 4:3); // 1 channel for every R,G,B value
       size_t packetCount = ((channelCount-1) / DDP_CHANNELS_PER_PACKET) +1;
@@ -858,6 +862,10 @@ uint8_t realtimeBroadcast(uint8_t type, IPAddress client, uint16_t length, const
 
     case 2: //ArtNet
     {
+      #if defined(WLED_USE_ETHERNET) && !defined(ESP8266)
+      ddpUdp.begin(Network.localIP(), ARTNET_DEFAULT_PORT); // in case we have Ethernet on ESP32, this forces that source IP/routing.
+      #endif
+
       // calculate the number of UDP packets we need to send
       const size_t channelCount = length * (isRGBW?4:3); // 1 channel for every R,G,B,(W?) value
       const size_t ARTNET_CHANNELS_PER_PACKET = isRGBW?512:510; // 512/4=128 RGBW LEDs, 510/3=170 RGB LEDs

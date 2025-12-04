@@ -21,6 +21,7 @@ const ethernet_settings ethernetBoards[] = {
   {
   },
 
+  #ifndef CONFIG_IDF_TARGET_ESP32S3
   // WT32-EHT01
   // Please note, from my testing only these pins work for LED outputs:
   //   IO2, IO4, IO12, IO14, IO15
@@ -145,6 +146,7 @@ const ethernet_settings ethernetBoards[] = {
     ETH_PHY_LAN8720,      // eth_type,
     ETH_CLOCK_GPIO0_OUT	// eth_clk_mode
   }
+  #endif
 };
 
 bool initEthernet()
@@ -165,6 +167,46 @@ bool initEthernet()
 
   DEBUG_PRINTF_P(PSTR("initE: Attempting ETH config: %d\n"), ethernetType);
 
+  // W5500 SPI Ethernet (T-ETH-Lite S3)
+  #if defined(ARDUINO_ARCH_ESP32S3)
+  if (ethernetType == WLED_ETH_W5500) {
+    #define ETH_MISO_PIN 11
+    #define ETH_MOSI_PIN 12
+    #define ETH_SCLK_PIN 10
+    #define ETH_CS_PIN   9
+    #define ETH_INT_PIN  13
+    #define ETH_RST_PIN  14
+    #define ETH_ADDR     1
+
+    managed_pin_type pinsToAllocate[6] = {
+      {ETH_MISO_PIN, false},
+      {ETH_MOSI_PIN, true},
+      {ETH_SCLK_PIN, true},
+      {ETH_CS_PIN, true},
+      {ETH_INT_PIN, false},
+      {ETH_RST_PIN, true}
+    };
+
+    if (!PinManager::allocateMultiplePins(pinsToAllocate, 6, PinOwner::Ethernet)) {
+      DEBUG_PRINTLN(F("initE: Failed to allocate W5500 SPI pins"));
+      return false;
+    }
+
+    if (!ETH.begin(ETH_PHY_W5500, ETH_ADDR, ETH_CS_PIN, ETH_INT_PIN, ETH_RST_PIN, SPI3_HOST, ETH_SCLK_PIN, ETH_MISO_PIN, ETH_MOSI_PIN)) {
+      DEBUG_PRINTLN(F("initE: ETH.begin() [SPI Ethernet W5500] failed"));
+      for (managed_pin_type mpt : pinsToAllocate) {
+        PinManager::deallocatePin(mpt.pin, PinOwner::Ethernet);
+      }
+      return false;
+    }
+
+    successfullyConfiguredEthernet = true;
+    DEBUG_PRINTLN(F("initE: *** W5500 SPI Ethernet successfully configured! ***"));
+    return true;
+  }
+  #endif
+
+  #ifndef CONFIG_IDF_TARGET_ESP32S3
   // Ethernet initialization should only succeed once -- else reboot required
   ethernet_settings es = ethernetBoards[ethernetType];
   managed_pin_type pinsToAllocate[10] = {
@@ -240,6 +282,7 @@ bool initEthernet()
   successfullyConfiguredEthernet = true;
   DEBUG_PRINTLN(F("initC: *** Ethernet successfully configured! ***"));
   return true;
+  #endif // CONFIG_IDF_TARGET_ESP32S3
 }
 #endif
 
