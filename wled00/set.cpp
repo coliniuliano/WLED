@@ -109,7 +109,53 @@ void handleSettingsSet(AsyncWebServerRequest *request, byte subPage)
     #endif
 
     #if defined(ARDUINO_ARCH_ESP32) && defined(WLED_USE_ETHERNET)
+    int oldEthernetType = ethernetType;
+    IPAddress oldEthIP = ethernetStaticIP;
+    IPAddress oldEthGW = ethernetStaticGW;
+    IPAddress oldEthSN = ethernetStaticSN;
+
     ethernetType = request->arg(F("ETH")).toInt();
+    for (size_t i = 0; i < 4; i++) {
+      char ei[4] = "EI0"; ei[2] = 48+i; // EI0, EI1, EI2, EI3
+      char eg[4] = "EG0"; eg[2] = 48+i; // EG0, EG1, EG2, EG3
+      char es[4] = "ES0"; es[2] = 48+i; // ES0, ES1, ES2, ES3
+      ethernetStaticIP[i] = request->arg(ei).toInt();
+      ethernetStaticGW[i] = request->arg(eg).toInt();
+      ethernetStaticSN[i] = request->arg(es).toInt();
+    }
+
+    // Handle Ethernet configuration changes
+    bool ethTypeChanged = (oldEthernetType != ethernetType);
+    bool ethIPChanged = (oldEthIP != ethernetStaticIP ||
+                         oldEthGW != ethernetStaticGW ||
+                         oldEthSN != ethernetStaticSN);
+
+    if (ethTypeChanged) {
+      // Ethernet type changed - need full reboot to call ETH.begin() with new hardware
+      DEBUG_PRINTLN(F("ETH: Type changed, rebooting..."));
+      doReboot = true;
+    } else if (ethIPChanged && Network.isEthernet()) {
+      // Only IP settings changed and Ethernet is active - reconfigure without reboot
+      DEBUG_PRINTLN(F("ETH: Reconfiguring IP address..."));
+      if (ethernetStaticIP != (uint32_t)0x00000000) {
+        // Static IP configured (gateway can be 0.0.0.0 for link-local)
+        ETH.config(ethernetStaticIP, ethernetStaticGW, ethernetStaticSN, dnsAddress);
+        DEBUG_PRINT(F("ETH: Static IP: ")); DEBUG_PRINTLN(ethernetStaticIP);
+        DEBUG_PRINT(F("ETH: Gateway: ")); DEBUG_PRINTLN(ethernetStaticGW);
+        DEBUG_PRINT(F("ETH: Subnet: ")); DEBUG_PRINTLN(ethernetStaticSN);
+        // Reset DHCP/link-local state since we're using static IP now
+        ethernetDhcpStartTime = 0;
+        ethernetLinkLocalAssigned = false;
+      } else {
+        // No static IP - use DHCP with auto link-local fallback
+        ETH.config(INADDR_NONE, INADDR_NONE, INADDR_NONE);
+        DEBUG_PRINTLN(F("ETH: Switched to DHCP"));
+        // Start DHCP timer for auto link-local fallback
+        ethernetDhcpStartTime = millis();
+        ethernetLinkLocalAssigned = false;
+      }
+    }
+
     initEthernet();
     #endif
   }

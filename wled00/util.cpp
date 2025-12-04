@@ -1166,7 +1166,12 @@ String generateDeviceFingerprint() {
   esp_chip_info(&chip_info);
   esp_efuse_mac_get_default((uint8_t*)fp);
   fp[1] ^= ESP.getFlashChipSize();
+  // Arduino ESP32 2.x uses IDF 4.4.x which doesn't have full_revision
+  #if defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
   fp[0] ^= chip_info.full_revision | (chip_info.model << 16);
+  #else
+  fp[0] ^= chip_info.revision | (chip_info.model << 16);
+  #endif
   // mix in ADC calibration data:
   esp_adc_cal_characteristics_t ch;
   #if SOC_ADC_MAX_BITWIDTH == 13 // S2 has 13 bit ADC

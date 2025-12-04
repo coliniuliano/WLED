@@ -284,7 +284,40 @@ void WLED::loop()
     lastWifiState = WiFi.status();
     DEBUG_PRINTF_P(PSTR("State time: %lu\n"),        wifiStateChangedTime);
     DEBUG_PRINTF_P(PSTR("NTP last sync: %lu\n"),     ntpLastSyncTime);
-    DEBUG_PRINTF_P(PSTR("Client IP: %u.%u.%u.%u\n"), Network.localIP()[0], Network.localIP()[1], Network.localIP()[2], Network.localIP()[3]);
+    DEBUG_PRINTLN(F("=== Network Status ==="));
+    DEBUG_PRINTF_P(PSTR("Primary IP: %u.%u.%u.%u (via %s)\n"),
+                   Network.localIP()[0], Network.localIP()[1], Network.localIP()[2], Network.localIP()[3],
+                   Network.isEthernet() ? "Ethernet" : "WiFi");
+
+    #if defined(ARDUINO_ARCH_ESP32) && defined(WLED_USE_ETHERNET)
+    // Ethernet interface status
+    if (Network.isEthernetUp()) {
+      IPAddress ethIP = Network.ethernetIP();
+      IPAddress ethGW = Network.ethernetGatewayIP();
+      IPAddress ethSN = Network.ethernetSubnetMask();
+      DEBUG_PRINTLN(F("Ethernet: Connected"));
+      DEBUG_PRINTF_P(PSTR("  IP:      %u.%u.%u.%u\n"), ethIP[0], ethIP[1], ethIP[2], ethIP[3]);
+      DEBUG_PRINTF_P(PSTR("  Gateway: %u.%u.%u.%u\n"), ethGW[0], ethGW[1], ethGW[2], ethGW[3]);
+      DEBUG_PRINTF_P(PSTR("  Subnet:  %u.%u.%u.%u\n"), ethSN[0], ethSN[1], ethSN[2], ethSN[3]);
+      DEBUG_PRINTF_P(PSTR("  Link:    %uMbps %s\n"), ETH.linkSpeed(), ETH.fullDuplex() ? "Full-Duplex" : "Half-Duplex");
+    } else {
+      DEBUG_PRINTLN(F("Ethernet: Not connected"));
+    }
+    #endif
+
+    // WiFi interface status
+    if (Network.isWiFiUp()) {
+      IPAddress wifiIP = Network.wifiIP();
+      IPAddress wifiGW = Network.wifiGatewayIP();
+      IPAddress wifiSN = Network.wifiSubnetMask();
+      DEBUG_PRINTF_P(PSTR("WiFi: Connected to %s\n"), WiFi.SSID().c_str());
+      DEBUG_PRINTF_P(PSTR("  IP:      %u.%u.%u.%u\n"), wifiIP[0], wifiIP[1], wifiIP[2], wifiIP[3]);
+      DEBUG_PRINTF_P(PSTR("  Gateway: %u.%u.%u.%u\n"), wifiGW[0], wifiGW[1], wifiGW[2], wifiGW[3]);
+      DEBUG_PRINTF_P(PSTR("  Subnet:  %u.%u.%u.%u\n"), wifiSN[0], wifiSN[1], wifiSN[2], wifiSN[3]);
+      DEBUG_PRINTF_P(PSTR("  RSSI:    %ddBm (Quality: %d%%)\n"), WiFi.RSSI(), getSignalQuality(WiFi.RSSI()));
+    } else {
+      DEBUG_PRINTLN(F("WiFi: Not connected"));
+    }
     if (loops > 0) { // avoid division by zero
       DEBUG_PRINTF_P(PSTR("Loops/sec: %u\n"),         loops / 30);
       DEBUG_PRINTF_P(PSTR("Loop time[ms]: %u/%lu\n"), avgLoopMillis/loops,    maxLoopMillis);
@@ -753,6 +786,7 @@ void WLED::initInterfaces()
     MDNS.begin(cmDNS);
 
     DEBUG_PRINTLN(F("mDNS started"));
+    // mDNS automatically advertises on all active interfaces (WiFi + Ethernet)
     MDNS.addService("http", "tcp", 80);
     MDNS.addService("wled", "tcp", 80);
     MDNS.addServiceTxt("wled", "tcp", "mac", escapedMac.c_str());
@@ -863,10 +897,88 @@ void WLED::handleConnection()
         DEBUG_PRINTF_P(PSTR("Temporary AP disabled (@ %lus).\n"), nowS);
       }
     }
-  } else if (!interfacesInited) { //newly connected
+  }
+
+  #if defined(ARDUINO_ARCH_ESP32) && defined(WLED_USE_ETHERNET)
+  // Only handle DHCP/link-local if NOT using static IP
+  // Static IP is indicated by ethernetDhcpStartTime == 0 (set in network.cpp ETH_CONNECTED event)
+  if (ethernetDhcpStartTime > 0 && !ethernetLinkLocalAssigned && ETH.linkUp()) {
+    // DHCP was requested (not static IP), link is up, and we haven't assigned link-local yet
+    if (now - ethernetDhcpStartTime > 250) { // 250ms timeout (fast fallback for streaming)
+      if (ETH.localIP()[0] == 0) {
+        // Still no IP after 250ms, assign link-local (APIPA) 169.254.x.x
+        DEBUG_PRINTLN(F("ETH: DHCP timeout, assigning link-local IP (APIPA)"));
+
+        // Generate random IP in 169.254.1.0 - 169.254.254.255 range
+        // Avoid .0 and .255 in last octet
+        uint8_t third = random(1, 255);
+        uint8_t fourth = random(1, 255);
+        IPAddress linkLocalIP(169, 254, third, fourth);
+        IPAddress linkLocalGW(169, 254, 1, 1);
+        IPAddress linkLocalSN(255, 255, 0, 0);
+
+        ETH.config(linkLocalIP, linkLocalGW, linkLocalSN);
+
+        DEBUG_PRINT(F("ETH: Link-local IP: ")); DEBUG_PRINTLN(linkLocalIP);
+        DEBUG_PRINT(F("ETH: Gateway: ")); DEBUG_PRINTLN(linkLocalGW);
+        DEBUG_PRINT(F("ETH: Subnet: ")); DEBUG_PRINTLN(linkLocalSN);
+
+        ethernetLinkLocalAssigned = true;
+        ethernetDhcpStartTime = now; // Keep timestamp for periodic DHCP retry
+      } else {
+        // Got an IP from DHCP (or static IP was already applied)
+        DEBUG_PRINT(F("ETH: IP configured: ")); DEBUG_PRINTLN(ETH.localIP());
+        ethernetDhcpStartTime = 0;
+      }
+    }
+  }
+
+  // If using link-local IP, periodically retry DHCP with exponential backoff
+  // Fast retries initially (for quick DHCP server response), then backoff to 10-15 seconds
+  // This ONLY runs when link-local is active (not static IP, not DHCP success)
+  if (ethernetLinkLocalAssigned && ETH.linkUp() && ethernetDhcpStartTime > 0) {
+    static uint8_t dhcpRetryCount = 0;
+    unsigned long dhcpRetryInterval;
+
+    // Exponential backoff: 500ms, 1s, 2s, 4s, then settle at 12s
+    if (dhcpRetryCount == 0) {
+      dhcpRetryInterval = 500;  // First retry very quick
+    } else if (dhcpRetryCount == 1) {
+      dhcpRetryInterval = 1000; // Second retry 1s
+    } else if (dhcpRetryCount == 2) {
+      dhcpRetryInterval = 2000; // Third retry 2s
+    } else if (dhcpRetryCount == 3) {
+      dhcpRetryInterval = 4000; // Fourth retry 4s
+    } else {
+      dhcpRetryInterval = 12000; // Settle at 12s for ongoing checks
+    }
+
+    if (now - ethernetDhcpStartTime > dhcpRetryInterval) {
+      DEBUG_PRINTF_P(PSTR("ETH: Link-local active, retrying DHCP (attempt %d)...\n"), dhcpRetryCount + 1);
+      ETH.config(INADDR_NONE, INADDR_NONE, INADDR_NONE); // Re-enable DHCP
+      ethernetDhcpStartTime = now; // Reset timer for next check
+      dhcpRetryCount++;
+      // Don't reset ethernetLinkLocalAssigned yet - will be reset when DHCP succeeds
+    }
+    // Check if DHCP succeeded
+    if (ETH.localIP()[0] != 0 && ETH.localIP()[0] != 169) { // Got non-link-local IP
+      DEBUG_PRINT(F("ETH: DHCP now available! Switched to: ")); DEBUG_PRINTLN(ETH.localIP());
+      ethernetLinkLocalAssigned = false;
+      ethernetDhcpStartTime = 0;
+      dhcpRetryCount = 0; // Reset retry counter for next time
+    }
+  }
+  #endif
+
+  if (Network.isConnected() && !interfacesInited) { //newly connected
     DEBUG_PRINTLN();
     DEBUG_PRINT(F("Connected! IP address: "));
-    DEBUG_PRINTLN(Network.localIP());
+    DEBUG_PRINT(Network.localIP());
+    if (Network.isEthernet()) {
+      DEBUG_PRINTLN(F(" via Ethernet"));
+    } else {
+      DEBUG_PRINTLN(F(" via WiFi"));
+    }
     if (improvActive) {
       if (improvError == 3) sendImprovStateResponse(0x00, true);
       sendImprovStateResponse(0x04);

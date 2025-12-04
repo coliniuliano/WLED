@@ -93,7 +93,12 @@
 #else // ESP32
   #include <HardwareSerial.h>  // ensure we have the correct "Serial" on new MCUs (depends on ARDUINO_USB_MODE and ARDUINO_USB_CDC_ON_BOOT)
   #include <WiFi.h>
-  #include <ETH.h>
+  #if defined(ARDUINO_ARCH_ESP32S3) && defined(WLED_USE_ETHERNET)
+    #include <ETHClass2.h>
+    #define ETH ETH2
+  #else
+    #include <ETH.h>
+  #endif
   #include "esp_wifi.h"
   #include <ESPmDNS.h>
   #include <AsyncTCP.h>
@@ -390,6 +395,11 @@ WLED_GLOBAL uint8_t txPower _INIT(WIFI_POWER_19_5dBm);
   #else
     WLED_GLOBAL int ethernetType _INIT(WLED_ETH_NONE);             // use none for ethernet board type if default not defined
   #endif
+  WLED_GLOBAL IPAddress ethernetStaticIP _INIT_N(((0, 0, 0, 0))); // Ethernet static IP
+  WLED_GLOBAL IPAddress ethernetStaticGW _INIT_N(((0, 0, 0, 0))); // Ethernet static gateway
+  WLED_GLOBAL IPAddress ethernetStaticSN _INIT_N(((255, 255, 255, 0))); // Ethernet static subnet
+  WLED_GLOBAL unsigned long ethernetDhcpStartTime _INIT(0); // Time when DHCP was requested
+  WLED_GLOBAL bool ethernetLinkLocalAssigned _INIT(false); // Whether we've assigned link-local IP
 #endif
 
 // LED CONFIG

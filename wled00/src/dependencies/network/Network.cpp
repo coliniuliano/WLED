@@ -4,9 +4,19 @@ IPAddress NetworkClass::localIP()
 {
   IPAddress localIP;
 #if defined(ARDUINO_ARCH_ESP32) && defined(WLED_USE_ETHERNET)
-  localIP = ETH.localIP();
-  if (localIP[0] != 0) {
-    return localIP;
+  if (ETH.linkUp()) {
+    localIP = ETH.localIP();
+    if (localIP[0] != 0) {
+      return localIP;
+    }
+
+    // ETH.localIP() returns 0.0.0.0 but link is up - check if static IP is configured
+    extern IPAddress ethernetStaticIP;
+    extern unsigned long ethernetDhcpStartTime;
+    if (ethernetStaticIP != (uint32_t)0x00000000 && ethernetDhcpStartTime == 0) {
+      // Static IP configured, return it
+      return ethernetStaticIP;
+    }
   }
 #endif
   localIP = WiFi.localIP();
@@ -20,8 +30,18 @@ IPAddress NetworkClass::localIP()
 IPAddress NetworkClass::subnetMask()
 {
 #if defined(ARDUINO_ARCH_ESP32) && defined(WLED_USE_ETHERNET)
-  if (ETH.localIP()[0] != 0) {
-    return ETH.subnetMask();
+  if (ETH.linkUp()) {
+    if (ETH.localIP()[0] != 0) {
+      return ETH.subnetMask();
+    }
+
+    // ETH.localIP() returns 0.0.0.0 but link is up - check if static subnet is configured
+    extern IPAddress ethernetStaticIP;
+    extern IPAddress ethernetStaticSN;
+    extern unsigned long ethernetDhcpStartTime;
+    if (ethernetStaticIP != (uint32_t)0x00000000 && ethernetDhcpStartTime == 0) {
+      return ethernetStaticSN;
+    }
   }
 #endif
   if (WiFi.localIP()[0] != 0) {
@@ -33,8 +53,18 @@ IPAddress NetworkClass::subnetMask()
 IPAddress NetworkClass::gatewayIP()
 {
 #if defined(ARDUINO_ARCH_ESP32) && defined(WLED_USE_ETHERNET)
-  if (ETH.localIP()[0] != 0) {
+  if (ETH.linkUp()) {
+    if (ETH.localIP()[0] != 0) {
       return ETH.gatewayIP();
+    }
+
+    // ETH.localIP() returns 0.0.0.0 but link is up - check if static gateway is configured
+    extern IPAddress ethernetStaticIP;
+    extern IPAddress ethernetStaticGW;
+    extern unsigned long ethernetDhcpStartTime;
+    if (ethernetStaticIP != (uint32_t)0x00000000 && ethernetDhcpStartTime == 0) {
+      return ethernetStaticGW;
+    }
   }
 #endif
   if (WiFi.localIP()[0] != 0) {
@@ -79,9 +109,115 @@ bool NetworkClass::isConnected()
 bool NetworkClass::isEthernet()
 {
 #if defined(ARDUINO_ARCH_ESP32) && defined(WLED_USE_ETHERNET)
-  return (ETH.localIP()[0] != 0) && ETH.linkUp();
+  // Check if link is up first
+  if (!ETH.linkUp()) return false;
+
+  // If ETH.localIP() reports an IP, we're definitely connected
+  if (ETH.localIP()[0] != 0) return true;
+
+  // ETH.localIP() might return 0.0.0.0 with some drivers (like W5500) even when static IP is configured
+  // Check if we have a static IP configured - if so, trust the link status
+  extern IPAddress ethernetStaticIP;
+  extern unsigned long ethernetDhcpStartTime;
+  if (ethernetStaticIP != (uint32_t)0x00000000 && ethernetDhcpStartTime == 0) {
+    // Static IP is configured (ethernetDhcpStartTime == 0 means not using DHCP)
+    return true;
+  }
+
+  return false;
 #endif
   return false;
+}
+
+// Dual-interface methods - Ethernet specific
+IPAddress NetworkClass::ethernetIP()
+{
+#if defined(ARDUINO_ARCH_ESP32) && defined(WLED_USE_ETHERNET)
+  if (ETH.linkUp()) {
+    IPAddress ip = ETH.localIP();
+    if (ip[0] != 0) return ip;
+
+    // Fallback to configured static IP
+    extern IPAddress ethernetStaticIP;
+    extern unsigned long ethernetDhcpStartTime;
+    if (ethernetStaticIP != (uint32_t)0x00000000 && ethernetDhcpStartTime == 0) {
+      return ethernetStaticIP;
+    }
+  }
+#endif
+  return INADDR_NONE;
+}
+
+IPAddress NetworkClass::ethernetSubnetMask()
+{
+#if defined(ARDUINO_ARCH_ESP32) && defined(WLED_USE_ETHERNET)
+  if (ETH.linkUp()) {
+    if (ETH.localIP()[0] != 0) return ETH.subnetMask();
+
+    extern IPAddress ethernetStaticIP;
+    extern IPAddress ethernetStaticSN;
+    extern unsigned long ethernetDhcpStartTime;
+    if (ethernetStaticIP != (uint32_t)0x00000000 && ethernetDhcpStartTime == 0) {
+      return ethernetStaticSN;
+    }
+  }
+#endif
+  return INADDR_NONE;
+}
+
+IPAddress NetworkClass::ethernetGatewayIP()
+{
+#if defined(ARDUINO_ARCH_ESP32) && defined(WLED_USE_ETHERNET)
+  if (ETH.linkUp()) {
+    if (ETH.localIP()[0] != 0) return ETH.gatewayIP();
+
+    extern IPAddress ethernetStaticIP;
+    extern IPAddress ethernetStaticGW;
+    extern unsigned long ethernetDhcpStartTime;
+    if (ethernetStaticIP != (uint32_t)0x00000000 && ethernetDhcpStartTime == 0) {
+      return ethernetStaticGW;
+    }
+  }
+#endif
+  return INADDR_NONE;
+}
+
+bool NetworkClass::isEthernetUp()
+{
+#if defined(ARDUINO_ARCH_ESP32) && defined(WLED_USE_ETHERNET)
+  return isEthernet(); // Reuse existing logic
+#endif
+  return false;
+}
+
+// Dual-interface methods - WiFi specific
+IPAddress NetworkClass::wifiIP()
+{
+  if (WiFi.status() == WL_CONNECTED) {
+    return WiFi.localIP();
+  }
+  return INADDR_NONE;
+}
+
+IPAddress NetworkClass::wifiSubnetMask()
+{
+  if (WiFi.status() == WL_CONNECTED) {
+    return WiFi.subnetMask();
+  }
+  return INADDR_NONE;
+}
+
+IPAddress NetworkClass::wifiGatewayIP()
+{
+  if (WiFi.status() == WL_CONNECTED) {
+    return WiFi.gatewayIP();
+  }
+  return INADDR_NONE;
+}
+
+bool NetworkClass::isWiFiUp()
+{
+  return (WiFi.status() == WL_CONNECTED && WiFi.localIP()[0] != 0);
 }
 
 NetworkClass Network;

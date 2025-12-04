@@ -1,87 +1,64 @@
-<p align="center">
-  <img src="/images/wled_logo_akemi.png">
-  <a href="https://github.com/wled-dev/WLED/releases"><img src="https://img.shields.io/github/release/wled-dev/WLED.svg?style=flat-square"></a>
-  <a href="https://raw.githubusercontent.com/wled-dev/WLED/main/LICENSE"><img src="https://img.shields.io/github/license/wled-dev/wled?color=blue&style=flat-square"></a>
-  <a href="https://wled.discourse.group"><img src="https://img.shields.io/discourse/topics?colorB=blue&label=forum&server=https%3A%2F%2Fwled.discourse.group%2F&style=flat-square"></a>
-  <a href="https://discord.gg/QAh7wJHrRM"><img src="https://img.shields.io/discord/473448917040758787.svg?colorB=blue&label=discord&style=flat-square"></a>
-  <a href="https://kno.wled.ge"><img src="https://img.shields.io/badge/quick_start-wiki-blue.svg?style=flat-square"></a>
-  <a href="https://github.com/Aircoookie/WLED-App"><img src="https://img.shields.io/badge/app-wled-blue.svg?style=flat-square"></a>
-  <a href="https://gitpod.io/#https://github.com/wled-dev/WLED"><img src="https://img.shields.io/badge/Gitpod-ready--to--code-blue?style=flat-square&logo=gitpod"></a>
+# WLED modified for W5500 support for sACN/E1.31 lighting
 
-  </p>
+The goal of this project is to use LED strips with sACN, ArtNet, or whatever DMX protocol while
+simultaneously getting the benefits of WLED while DMX is not in use.
 
-# Welcome to WLED! ✨
+This setup allows a W5500 module to work with an ESP32-S3 to receive DMX (and power) over ethernet.
 
-A fast and feature-rich implementation of an ESP32 and ESP8266 webserver to control NeoPixel (WS2812B, WS2811, SK6812) LEDs or also SPI based chipsets like the WS2801 and APA102!
+## Setup (my specific case)
 
-Originally created by [Aircoookie](https://github.com/Aircoookie)
+- No additional components, just hardwire the W5500 module into the hardcoded pins in network.cpp
+- Connect to a switch (no internet, no DHCP)
+  - `ETH-E: Connected` message appears in debug mode
+- Connect laptop to the switch too
+  - Shows up in network settings as Self-assigned IP (169.254.x.x)
+- Visit WLED address 169.254.y.y in a browser, WLED page loads through the switch
+- Note you can use Wifi and ethernet simulateously
 
-## ⚙️ Features
-- WS2812FX library with more than 100 special effects  
-- FastLED noise effects and 50 palettes  
-- Modern UI with color, effect and segment controls  
-- Segments to set different effects and colors to user defined parts of the LED string  
-- Settings page - configuration via the network  
-- Access Point and station mode - automatic failsafe AP  
-- [Up to 10 LED outputs](https://kno.wled.ge/features/multi-strip/#esp32) per instance
-- Support for RGBW strips  
-- Up to 250 user presets to save and load colors/effects easily, supports cycling through them.  
-- Presets can be used to automatically execute API calls  
-- Nightlight function (gradually dims down)  
-- Full OTA software updateability (HTTP + ArduinoOTA), password protectable  
-- Configurable analog clock (Cronixie, 7-segment and EleksTube IPS clock support via usermods) 
-- Configurable Auto Brightness limit for safe operation  
-- Filesystem-based config for easier backup of presets and settings  
+## Changes from stock
 
-## 💡 Supported light control interfaces
-- WLED app for [Android](https://play.google.com/store/apps/details?id=ca.cgagnier.wlednativeandroid) and [iOS](https://apps.apple.com/gb/app/wled-native/id6446207239)
-- JSON and HTTP request APIs  
-- MQTT   
-- E1.31, Art-Net, DDP and TPM2.net
-- [diyHue](https://github.com/diyhue/diyHue) (Wled is supported by diyHue, including Hue Sync Entertainment under udp. Thanks to [Gregory Mallios](https://github.com/gmallios))
-- [Hyperion](https://github.com/hyperion-project/hyperion.ng)
-- UDP realtime  
-- Alexa voice control (including dimming and color)  
-- Sync to Philips hue lights  
-- Adalight (PC ambilight via serial) and TPM2  
-- Sync color of multiple WLED devices (UDP notifier)  
-- Infrared remotes (24-key RGB, receiver required)  
-- Simple timers/schedules (time from NTP, timezones/DST supported)  
+### Ethernet Support Additions
 
-## 📲 Quick start guide and documentation
+1. **Separate Ethernet Static IP Configuration** (wled.h, cfg.cpp, set.cpp, xml.cpp, settings_wifi.htm)
+   - Allows setting a separate IP for ethernet and wifi so ethernet can be on a non-DHCP network with a static address but wifi can use DHCP
+   - Added `ethernetStaticIP`, `ethernetStaticGW`, `ethernetStaticSN` globals
+   - Ethernet now has independent IP config from WiFi
+   - Web UI includes Ethernet IP settings fields
 
-See the [documentation on our official site](https://kno.wled.ge)!
+2. **Ultra-Fast Link-Local Fallback** (wled.cpp, wled.h, network.cpp)
+   - Use an auto-assigned IP quickly and then check for DHCP after (intended to use on an unmanaged switch without internet)
+   - 250ms DHCP timeout (was 3s) for instant link-local assignment
+   - Exponential backoff DHCP retries: 500ms → 1s → 2s → 4s → 12s
+   - Automatic APIPA (169.254.x.x) when DHCP unavailable
+   - Supports static IPs with no gateway (0.0.0.0) for link-local
 
-[On this page](https://kno.wled.ge/basics/tutorials/) you can find excellent tutorials and tools to help you get your new project up and running!
+3. **W5500 Static IP Detection Fix** (Network.cpp)
+   - Mostly just to fix debug logs which claimed unconnected when ethernet was on a static or self-assigned IP
+   - W5500 driver returns 0.0.0.0 from ETH.localIP() even when configured
+   - Added fallback to configured static IP values
+   - Enhanced isEthernet(), localIP(), subnetMask(), gatewayIP() with workarounds
 
-## 🖼️ User interface
-<img src="/images/macbook-pro-space-gray-on-the-wooden-table.jpg" width="50%"><img src="/images/walking-with-iphone-x.jpg" width="50%">
+4. **Dual-Interface WiFi + Ethernet** (network.cpp, Network.h, Network.cpp, wled.cpp)
+   - Allows ethernet and wifi to coexist
+   - Removed WiFi.disconnect() on Ethernet connection
+   - Both interfaces operate simultaneously
+   - Added interface-specific methods: ethernetIP(), wifiIP(), isEthernetUp(), isWiFiUp()
+   - Primary interface priority: Ethernet preferred if both active
+   - Enhanced debug output shows both interfaces
 
-## 💾 Compatible hardware
+5. **Link-Local IP Trusted Subnet** (wled_server.cpp)
+   - Prevents PIN requirement for link-local connections which gave Access Denied errors
+   - Added 169.254.0.0/16 to trusted subnet list
 
-See [here](https://kno.wled.ge/basics/compatible-hardware)!
+6. **Instant IP Reconfiguration** (set.cpp)
+   - Prevents need to restart when updating ethernet config
+   - Ethernet IP changes apply immediately via ETH.config()
+   - Only reboots when Ethernet type changes (hardware init)
+   - Minimizes service disruption
 
-## ✌️ Other
+### Platform Configuration
 
-Licensed under the EUPL v1.2 license  
-Credits [here](https://kno.wled.ge/about/contributors/)!
-CORS proxy by [Corsfix](https://corsfix.com/)
-
-Join the Discord server to discuss everything about WLED!
-
-<a href="https://discord.gg/QAh7wJHrRM"><img src="https://discordapp.com/api/guilds/473448917040758787/widget.png?style=banner2" width="25%"></a>
-
-Check out the WLED [Discourse forum](https://wled.discourse.group)!  
-
-You can also send me mails to [dev.aircoookie@gmail.com](mailto:dev.aircoookie@gmail.com), but please, only do so if you want to talk to me privately.  
-
-If WLED really brightens up your day, you can [![](https://img.shields.io/badge/send%20me%20a%20small%20gift-paypal-blue.svg?style=flat-square)](https://paypal.me/aircoookie)
-
-
-*Disclaimer:*   
-
-If you are prone to photosensitive epilepsy, we recommended you do **not** use this software.  
-If you still want to try, don't use strobe, lighting or noise modes or high effect speed settings.
-
-As per the EUPL license, I assume no liability for any damage to you or any other person or equipment.  
+- **platformio.ini**: Using non-Tasmota ESP32 platform (espressif32 @ 5.4.0)
+  - Required for W5500 functions not in Tasmota build
+  - ESP-IDF 4.4+ minimum for ETHClass2 support
 
