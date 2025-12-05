@@ -1,3 +1,30 @@
+## Status
+
+- Working! with specific configuration (eg no Wifi because it steamrolls the ETH)
+
+## Setup
+
+- No additional components, just hardwire the W5500 module into the hardcoded pins in network.cpp
+- Do not connect Wifi since Wifi and ETH share a static IP address which will never work
+- Wifi appears to have priority over ETH
+- Connect to a switch (no internet, no DHCP)
+  - `ETH-E: Connected` message appears in debug mode
+- Connect to the WLED-AP access point and set a static IP address
+  - 169.254.x.x is the Automatic Private IP Addressing (APIPA) space
+  - 169.254.120.123 is what I used
+  - Gateway 169.254.1.1
+  - Subnet 255.255.0.0
+- Connect laptop to the switch too
+  - Shows up in network settings as Self-assigned IP (169.254.129.160 in this case)
+- Visit WLED address 169.254.120.123 in a browser, WLED page loads through the switch
+
+
+
+
+
+
+
+
 🎯 Why ETHClass2 is MUCH BETTER
 
   The Key Advantage
