@@ -170,12 +170,19 @@ bool initEthernet()
   // W5500 SPI Ethernet (T-ETH-Lite S3)
   #if defined(ARDUINO_ARCH_ESP32S3)
   if (ethernetType == WLED_ETH_W5500) {
-    #define ETH_MISO_PIN 11
-    #define ETH_MOSI_PIN 12
-    #define ETH_SCLK_PIN 10
-    #define ETH_CS_PIN   9
-    #define ETH_INT_PIN  13
-    #define ETH_RST_PIN  14
+    // #define ETH_MISO_PIN 11
+    // #define ETH_MOSI_PIN 12
+    // #define ETH_SCLK_PIN 10
+    // #define ETH_CS_PIN   9
+    // #define ETH_INT_PIN  13
+    // #define ETH_RST_PIN  14
+    // #define ETH_ADDR     1
+    #define ETH_MISO_PIN 13
+    #define ETH_MOSI_PIN 11
+    #define ETH_SCLK_PIN 12
+    #define ETH_CS_PIN   10
+    #define ETH_INT_PIN  4
+    #define ETH_RST_PIN  5
     #define ETH_ADDR     1
 
     managed_pin_type pinsToAllocate[6] = {
