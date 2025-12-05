@@ -18,8 +18,23 @@
   - Shows up in network settings as Self-assigned IP (169.254.129.160 in this case)
 - Visit WLED address 169.254.120.123 in a browser, WLED page loads through the switch
 
+## Things to do
 
+- Document decisions (like why we needed to use non-Tasmota platform)
+  - ETHClass2 calls w5500 functions that are not compiled into Tasmota version
+  - ESP-IDF minimum 4.4ish for those functions
+- Separate Wifi config from ETH config so that both can coexist
+  - Wifi currently takes over from ETH, at least when there is no DHCP
+- Look into DHCP and automatically assigning an IP in the 169.254 range
+- Test actual LEDs
+- Test ArtNet or sACN with actual LEDs
 
+## Intermittent
+
+Upon reconnecting the circuit, computer is unable to access 169.254.120.123
+For some reason it was unable to route packets to that address
+Changing to .124 appears to work
+The laptop was also given a static IP instead of trying DHCP
 
 
 
