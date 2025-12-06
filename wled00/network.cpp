@@ -450,10 +450,30 @@ void WiFiEvent(WiFiEvent_t event)
       if (!apActive) {
         WiFi.disconnect(true); // disable WiFi entirely
       }
-      if (multiWiFi[0].staticIP != (uint32_t)0x00000000 && multiWiFi[0].staticGW != (uint32_t)0x00000000) {
-        ETH.config(multiWiFi[0].staticIP, multiWiFi[0].staticGW, multiWiFi[0].staticSN, dnsAddress);
+      // Check if static IP is configured (IP must be non-zero; gateway can be 0.0.0.0 for link-local)
+      DEBUG_PRINTF_P(PSTR("ETH-E: Static IP config check - IP: %u.%u.%u.%u, GW: %u.%u.%u.%u\n"),
+                     ethernetStaticIP[0], ethernetStaticIP[1], ethernetStaticIP[2], ethernetStaticIP[3],
+                     ethernetStaticGW[0], ethernetStaticGW[1], ethernetStaticGW[2], ethernetStaticGW[3]);
+
+      if (ethernetStaticIP != (uint32_t)0x00000000) {
+        // Static IP configured - use it immediately (gateway can be 0.0.0.0 for link-local IPs)
+        DEBUG_PRINTLN(F("ETH-E: Using STATIC IP (no DHCP/link-local)"));
+        ETH.config(ethernetStaticIP, ethernetStaticGW, ethernetStaticSN, dnsAddress);
+        DEBUG_PRINT(F("ETH-E: Configured Static IP: ")); DEBUG_PRINTLN(ethernetStaticIP);
+        DEBUG_PRINT(F("ETH-E: Gateway: ")); DEBUG_PRINTLN(ethernetStaticGW);
+        DEBUG_PRINT(F("ETH-E: Subnet: ")); DEBUG_PRINTLN(ethernetStaticSN);
+        // Check what ETH.localIP() returns after config
+        delay(10); // Small delay to let config apply
+        DEBUG_PRINT(F("ETH-E: Actual ETH.localIP(): ")); DEBUG_PRINTLN(ETH.localIP());
+        DEBUG_PRINT(F("ETH-E: Link up? ")); DEBUG_PRINTLN(ETH.linkUp() ? "YES" : "NO");
+        ethernetDhcpStartTime = 0; // Not using DHCP (important: this prevents auto link-local fallback)
+        ethernetLinkLocalAssigned = false;
       } else {
+        // No static IP - use DHCP with auto link-local fallback
+        DEBUG_PRINTLN(F("ETH-E: No static IP configured, using DHCP with auto link-local fallback"));
         ETH.config(INADDR_NONE, INADDR_NONE, INADDR_NONE);
+        ethernetDhcpStartTime = millis(); // Start DHCP timer
+        ethernetLinkLocalAssigned = false;
       }
       // convert the "serverDescription" into a valid DNS hostname (alphanumeric)
       char hostname[64];
@@ -464,6 +484,9 @@ void WiFiEvent(WiFiEvent_t event)
       }
     case ARDUINO_EVENT_ETH_DISCONNECTED:
       DEBUG_PRINTLN(F("ETH-E: Disconnected"));
+      // Reset DHCP/link-local state on disconnect
+      ethernetDhcpStartTime = 0;
+      ethernetLinkLocalAssigned = false;
       // This doesn't really affect ethernet per se,
       // as it's only configured once.  Rather, it
       // may be necessary to reconnect the WiFi when

@@ -116,7 +116,7 @@
 Network name (SSID${i==0?", empty to not connect":""}):<br><input type="text" id="CS${i}" name="CS${i}" maxlength="32" value="${ssid}" ${i>0?"required":""}><br>
 Network password:<br><input type="password" name="PW${i}" maxlength="64" value="${pass}"><br>
 BSSID (optional):<br><input type="text" id="BS${i}" name="BS${i}" maxlength="12" value="${bssid}"><br>
-Static IP (leave at 0.0.0.0 for DHCP)${i==0?"<br>Also used by Ethernet":""}:<br>
+Static IP (leave at 0.0.0.0 for DHCP):<br>
 <input name="IP${i}0" type="number" class="s" min="0" max="255" value="${ip&0xFF}" required>.<input name="IP${i}1" type="number" class="s" min="0" max="255" value="${(ip>>8)&0xFF}" required>.<input name="IP${i}2" type="number" class="s" min="0" max="255" value="${(ip>>16)&0xFF}" required>.<input name="IP${i}3" type="number" class="s" min="0" max="255" value="${(ip>>24)&0xFF}" required><br>
 Static gateway:<br>
 <input name="GW${i}0" type="number" class="s" min="0" max="255" value="${gw&0xFF}" required>.<input name="GW${i}1" type="number" class="s" min="0" max="255" value="${(gw>>8)&0xFF}" required>.<input name="GW${i}2" type="number" class="s" min="0" max="255" value="${(gw>>16)&0xFF}" required>.<input name="GW${i}3" type="number" class="s" min="0" max="255" value="${(gw>>24)&0xFF}" required><br>
@@ -272,6 +272,13 @@ Static subnet mask:<br>
 				<option value="3">WESP32</option>
 				<option value="1">WT32-ETH01</option>
 			</select><br><br>
+			<h3>Ethernet Static IP</h3>
+			Static IP (leave at 0.0.0.0 for DHCP):<br>
+			<input name="EI0" type="number" class="s" min="0" max="255" required>.<input name="EI1" type="number" class="s" min="0" max="255" required>.<input name="EI2" type="number" class="s" min="0" max="255" required>.<input name="EI3" type="number" class="s" min="0" max="255" required><br>
+			Static gateway:<br>
+			<input name="EG0" type="number" class="s" min="0" max="255" required>.<input name="EG1" type="number" class="s" min="0" max="255" required>.<input name="EG2" type="number" class="s" min="0" max="255" required>.<input name="EG3" type="number" class="s" min="0" max="255" required><br>
+			Static subnet mask:<br>
+			<input name="ES0" type="number" class="s" min="0" max="255" required>.<input name="ES1" type="number" class="s" min="0" max="255" required>.<input name="ES2" type="number" class="s" min="0" max="255" required>.<input name="ES3" type="number" class="s" min="0" max="255" required><br><br>
 		</div>
 		<hr>
 		<button type="button" onclick="B()">Back</button><button type="submit">Save & Connect</button>

@@ -395,6 +395,11 @@ WLED_GLOBAL uint8_t txPower _INIT(WIFI_POWER_19_5dBm);
   #else
     WLED_GLOBAL int ethernetType _INIT(WLED_ETH_NONE);             // use none for ethernet board type if default not defined
   #endif
+  WLED_GLOBAL IPAddress ethernetStaticIP _INIT_N(((0, 0, 0, 0))); // Ethernet static IP
+  WLED_GLOBAL IPAddress ethernetStaticGW _INIT_N(((0, 0, 0, 0))); // Ethernet static gateway
+  WLED_GLOBAL IPAddress ethernetStaticSN _INIT_N(((255, 255, 255, 0))); // Ethernet static subnet
+  WLED_GLOBAL unsigned long ethernetDhcpStartTime _INIT(0); // Time when DHCP was requested
+  WLED_GLOBAL bool ethernetLinkLocalAssigned _INIT(false); // Whether we've assigned link-local IP
 #endif
 
 // LED CONFIG

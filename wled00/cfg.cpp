@@ -52,6 +52,16 @@ bool deserializeConfig(JsonObject doc, bool fromFS) {
 #ifdef WLED_USE_ETHERNET
   JsonObject ethernet = doc[F("eth")];
   CJSON(ethernetType, ethernet["type"]);
+  JsonArray eth_ip = ethernet["ip"];
+  JsonArray eth_gw = ethernet["gw"];
+  JsonArray eth_sn = ethernet["sn"];
+  if (!eth_ip.isNull() && !eth_gw.isNull() && !eth_sn.isNull()) {
+    for (size_t i = 0; i < 4; i++) {
+      CJSON(ethernetStaticIP[i], eth_ip[i]);
+      CJSON(ethernetStaticGW[i], eth_gw[i]);
+      CJSON(ethernetStaticSN[i], eth_sn[i]);
+    }
+  }
   // NOTE: Ethernet configuration takes priority over other use of pins
   initEthernet();
 #endif
@@ -920,6 +930,14 @@ void serializeConfig(JsonObject root) {
         break;
     }
     #endif
+  }
+  JsonArray eth_ip = ethernet.createNestedArray("ip");
+  JsonArray eth_gw = ethernet.createNestedArray("gw");
+  JsonArray eth_sn = ethernet.createNestedArray("sn");
+  for (size_t i = 0; i < 4; i++) {
+    eth_ip.add(ethernetStaticIP[i]);
+    eth_gw.add(ethernetStaticGW[i]);
+    eth_sn.add(ethernetStaticSN[i]);
   }
 #endif
 

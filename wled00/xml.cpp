@@ -248,6 +248,18 @@ void getSettingsJS(byte subPage, Print& settingsScript)
 
     #if defined(ARDUINO_ARCH_ESP32) && defined(WLED_USE_ETHERNET)
     printSetFormValue(settingsScript,PSTR("ETH"),ethernetType);
+    printSetFormValue(settingsScript,PSTR("EI0"),ethernetStaticIP[0]);
+    printSetFormValue(settingsScript,PSTR("EI1"),ethernetStaticIP[1]);
+    printSetFormValue(settingsScript,PSTR("EI2"),ethernetStaticIP[2]);
+    printSetFormValue(settingsScript,PSTR("EI3"),ethernetStaticIP[3]);
+    printSetFormValue(settingsScript,PSTR("EG0"),ethernetStaticGW[0]);
+    printSetFormValue(settingsScript,PSTR("EG1"),ethernetStaticGW[1]);
+    printSetFormValue(settingsScript,PSTR("EG2"),ethernetStaticGW[2]);
+    printSetFormValue(settingsScript,PSTR("EG3"),ethernetStaticGW[3]);
+    printSetFormValue(settingsScript,PSTR("ES0"),ethernetStaticSN[0]);
+    printSetFormValue(settingsScript,PSTR("ES1"),ethernetStaticSN[1]);
+    printSetFormValue(settingsScript,PSTR("ES2"),ethernetStaticSN[2]);
+    printSetFormValue(settingsScript,PSTR("ES3"),ethernetStaticSN[3]);
     #else
     //hide ethernet setting if not compiled in
     settingsScript.print(F("gId('ethd').style.display='none';"));

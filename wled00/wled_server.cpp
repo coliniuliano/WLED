@@ -58,6 +58,7 @@ static bool inLocalSubnet(const IPAddress &client) {
   return  inSubnet(client, IPAddress(10,0,0,0),    IPAddress(255,0,0,0))                  // 10.x.x.x
       ||  inSubnet(client, IPAddress(192,168,0,0), IPAddress(255,255,0,0))                // 192.168.x.x
       ||  inSubnet(client, IPAddress(172,16,0,0),  IPAddress(255,240,0,0))                // 172.16.x.x
+      ||  inSubnet(client, IPAddress(169,254,0,0), IPAddress(255,255,0,0))                // 169.254.x.x (link-local/APIPA)
       || (inSubnet(client, IPAddress(4,3,2,0),     IPAddress(255,255,255,0)) && apActive) // WLED AP
       ||  inSameSubnet(client);                                                           // same subnet as WLED device
 }
