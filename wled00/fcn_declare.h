@@ -83,10 +83,10 @@ void initDMXInput();
 void handleDMXInput();
 
 //e131.cpp
-void handleE131Packet(e131_packet_t* p, IPAddress clientIP, byte protocol);
+void handleE131Packet(e131_packet_t* p, IPAddress clientIP, byte protocol, IPAddress receivingIP);
 void handleDMXData(uint16_t uni, uint16_t dmxChannels, uint8_t* e131_data, uint8_t mde, uint8_t previousUniverses);
-void handleArtnetPollReply(IPAddress ipAddress);
-void prepareArtnetPollReply(ArtPollReply* reply);
+void handleArtnetPollReply(IPAddress ipAddress, IPAddress replyFromIP);
+void prepareArtnetPollReply(ArtPollReply* reply, IPAddress replyFromIP);
 void sendArtnetPollReply(ArtPollReply* reply, IPAddress ipAddress, uint16_t portAddress);
 
 //file.cpp

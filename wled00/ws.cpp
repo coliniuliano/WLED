@@ -81,12 +81,14 @@ void wsEvent(AsyncWebSocket * server, AsyncWebSocketClient * client, AwsEventTyp
         // first byte determines protocol. Note: since e131_packet_t is "packed", the compiler handles alignment issues
         //DEBUG_PRINTF_P(PSTR("WS binary message: len %u, byte0: %u\n"), len, data[0]);
         int offset = 1; // offset to skip protocol byte
+        // WebSocket doesn't expose receiving interface, use primary IP
+        IPAddress receivingIP = Network.localIP();
         switch (data[0]) {
           case BINARY_PROTOCOL_E131:
-            handleE131Packet((e131_packet_t*)&data[offset], client->remoteIP(), P_E131);
+            handleE131Packet((e131_packet_t*)&data[offset], client->remoteIP(), P_E131, receivingIP);
             break;
           case BINARY_PROTOCOL_ARTNET:
-            handleE131Packet((e131_packet_t*)&data[offset], client->remoteIP(), P_ARTNET);
+            handleE131Packet((e131_packet_t*)&data[offset], client->remoteIP(), P_ARTNET, receivingIP);
             break;
           case BINARY_PROTOCOL_DDP:
             if (len < 10 + offset) return; // DDP header is 10 bytes (+1 protocol byte)
@@ -95,7 +97,7 @@ void wsEvent(AsyncWebSocket * server, AsyncWebSocketClient * client, AwsEventTyp
             if ((flags & DDP_TIMECODE_FLAG) ) ddpDataLen += 4; // timecode flag adds 4 bytes to data length
             if (len < (10 + offset + ddpDataLen)) return; // not enough data, prevent out of bounds read
             // could be a valid DDP packet, forward to handler
-            handleE131Packet((e131_packet_t*)&data[offset], client->remoteIP(), P_DDP);
+            handleE131Packet((e131_packet_t*)&data[offset], client->remoteIP(), P_DDP, receivingIP);
         }
       }
     } else {

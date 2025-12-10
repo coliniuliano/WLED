@@ -192,14 +192,44 @@ void notify(byte callMode, bool followUp)
       DEBUG_PRINTLN(F("ESP-NOW sending packet failed."));
     }
   }
-  if (udpConnected) 
+  if (udpConnected)
 #endif
   {
     DEBUG_PRINTLN(F("UDP sending packet."));
+
+    #if defined(ARDUINO_ARCH_ESP32) && defined(WLED_USE_ETHERNET)
+    // Dual-interface mode: send on all active interfaces
+    bool sentOnAny = false;
+    if (Network.isEthernetUp()) {
+      IPAddress ethBroadcast = ~uint32_t(Network.ethernetSubnetMask()) | uint32_t(Network.ethernetGatewayIP());
+      notifierUdp.beginPacket(ethBroadcast, udpPort);
+      notifierUdp.write(udpOut, WLEDPACKETSIZE);
+      notifierUdp.endPacket();
+      sentOnAny = true;
+      DEBUG_PRINTF_P(PSTR("UDP sent on Ethernet to %d.%d.%d.%d\n"), ethBroadcast[0], ethBroadcast[1], ethBroadcast[2], ethBroadcast[3]);
+    }
+    if (Network.isWiFiUp()) {
+      IPAddress wifiBroadcast = ~uint32_t(Network.wifiSubnetMask()) | uint32_t(Network.wifiGatewayIP());
+      notifierUdp.beginPacket(wifiBroadcast, udpPort);
+      notifierUdp.write(udpOut, WLEDPACKETSIZE);
+      notifierUdp.endPacket();
+      sentOnAny = true;
+      DEBUG_PRINTF_P(PSTR("UDP sent on WiFi to %d.%d.%d.%d\n"), wifiBroadcast[0], wifiBroadcast[1], wifiBroadcast[2], wifiBroadcast[3]);
+    }
+    // Fallback if neither interface is up
+    if (!sentOnAny) {
+      IPAddress broadcastIp = ~uint32_t(Network.subnetMask()) | uint32_t(Network.gatewayIP());
+      notifierUdp.beginPacket(broadcastIp, udpPort);
+      notifierUdp.write(udpOut, WLEDPACKETSIZE);
+      notifierUdp.endPacket();
+    }
+    #else
+    // Single interface mode: use primary interface
     IPAddress broadcastIp = ~uint32_t(Network.subnetMask()) | uint32_t(Network.gatewayIP());
     notifierUdp.beginPacket(broadcastIp, udpPort);
     notifierUdp.write(udpOut, WLEDPACKETSIZE); // TODO: add actual used buffer size
     notifierUdp.endPacket();
+    #endif
   }
   notificationSentCallMode = callMode;
   notificationSentTime = millis();
@@ -698,6 +728,67 @@ void sendSysInfoUDP()
 {
   if (!udp2Connected) return;
 
+  #if defined(ARDUINO_ARCH_ESP32) && defined(WLED_USE_ETHERNET)
+  // Dual-interface mode: send info for each active interface
+  // This allows nodes on either network to discover us
+  if (Network.isEthernetUp()) {
+    IPAddress ethIP = Network.ethernetIP();
+    if (ethIP && ethIP != IPAddress(255,255,255,255)) {
+      uint8_t data[44] = {0};
+      data[0] = 255;
+      data[1] = 1;
+      for (size_t x = 0; x < 4; x++) data[x + 2] = ethIP[x];
+      memcpy((byte *)data + 6, serverDescription, 32);
+      #ifdef CONFIG_IDF_TARGET_ESP32S3
+      data[38] = NODE_TYPE_ID_ESP32S3;
+      #elif defined(CONFIG_IDF_TARGET_ESP32S2)
+      data[38] = NODE_TYPE_ID_ESP32S2;
+      #elif defined(CONFIG_IDF_TARGET_ESP32C3)
+      data[38] = NODE_TYPE_ID_ESP32C3;
+      #else
+      data[38] = NODE_TYPE_ID_ESP32;
+      #endif
+      if (bri) data[38] |= 0x80U;
+      data[39] = ethIP[3]; // unit ID == last IP number
+      uint32_t build = VERSION;
+      for (size_t i=0; i<sizeof(uint32_t); i++) data[40+i] = (build>>(8*i)) & 0xFF;
+
+      IPAddress broadcastIP(255, 255, 255, 255);
+      notifier2Udp.beginPacket(broadcastIP, udpPort2);
+      notifier2Udp.write(data, sizeof(data));
+      notifier2Udp.endPacket();
+    }
+  }
+  if (Network.isWiFiUp()) {
+    IPAddress wifiIP = Network.wifiIP();
+    if (wifiIP && wifiIP != IPAddress(255,255,255,255)) {
+      uint8_t data[44] = {0};
+      data[0] = 255;
+      data[1] = 1;
+      for (size_t x = 0; x < 4; x++) data[x + 2] = wifiIP[x];
+      memcpy((byte *)data + 6, serverDescription, 32);
+      #ifdef CONFIG_IDF_TARGET_ESP32S3
+      data[38] = NODE_TYPE_ID_ESP32S3;
+      #elif defined(CONFIG_IDF_TARGET_ESP32S2)
+      data[38] = NODE_TYPE_ID_ESP32S2;
+      #elif defined(CONFIG_IDF_TARGET_ESP32C3)
+      data[38] = NODE_TYPE_ID_ESP32C3;
+      #else
+      data[38] = NODE_TYPE_ID_ESP32;
+      #endif
+      if (bri) data[38] |= 0x80U;
+      data[39] = wifiIP[3]; // unit ID == last IP number
+      uint32_t build = VERSION;
+      for (size_t i=0; i<sizeof(uint32_t); i++) data[40+i] = (build>>(8*i)) & 0xFF;
+
+      IPAddress broadcastIP(255, 255, 255, 255);
+      notifier2Udp.beginPacket(broadcastIP, udpPort2);
+      notifier2Udp.write(data, sizeof(data));
+      notifier2Udp.endPacket();
+    }
+  }
+  #else
+  // Single interface mode: send primary IP only
   IPAddress ip = Network.localIP();
   if (!ip || ip == IPAddress(255,255,255,255)) ip = IPAddress(4,3,2,1);
 
@@ -744,6 +835,7 @@ void sendSysInfoUDP()
   notifier2Udp.beginPacket(broadcastIP, udpPort2);
   notifier2Udp.write(data, sizeof(data));
   notifier2Udp.endPacket();
+  #endif
 }
 
 

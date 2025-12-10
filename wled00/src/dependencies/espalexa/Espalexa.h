@@ -286,12 +286,11 @@ private:
     #endif
   }
 
-  //respond to UDP SSDP M-SEARCH
-  void respondToSearch()
+  //respond to UDP SSDP M-SEARCH with a specific IP
+  void respondToSearchWithIP(IPAddress respondIP)
   {
-    IPAddress localIP = Network.localIP();
     char s[16];
-    sprintf(s, "%d.%d.%d.%d", localIP[0], localIP[1], localIP[2], localIP[3]);
+    sprintf(s, "%d.%d.%d.%d", respondIP[0], respondIP[1], respondIP[2], respondIP[3]);
 
     char buf[1024];
 
@@ -311,7 +310,29 @@ private:
     #else
     espalexaUdp.write(buf);
     #endif
-    espalexaUdp.endPacket();                    
+    espalexaUdp.endPacket();
+  }
+
+  //respond to UDP SSDP M-SEARCH
+  // In dual-interface mode, respond with both IPs so clients on either network get the correct address
+  void respondToSearch()
+  {
+    #if defined(ARDUINO_ARCH_ESP32) && defined(WLED_USE_ETHERNET)
+    // Dual-interface mode: respond with each active interface's IP
+    if (Network.isEthernetUp()) {
+      respondToSearchWithIP(Network.ethernetIP());
+    }
+    if (Network.isWiFiUp()) {
+      respondToSearchWithIP(Network.wifiIP());
+    }
+    // If neither interface is up, fall back to primary IP
+    if (!Network.isEthernetUp() && !Network.isWiFiUp()) {
+      respondToSearchWithIP(Network.localIP());
+    }
+    #else
+    // Single interface mode: use primary IP
+    respondToSearchWithIP(Network.localIP());
+    #endif
   }
 
 public:

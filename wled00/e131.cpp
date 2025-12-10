@@ -62,7 +62,7 @@ void handleDDPPacket(e131_packet_t* p) {
 }
 
 //E1.31 and Art-Net protocol support
-void handleE131Packet(e131_packet_t* p, IPAddress clientIP, byte protocol){
+void handleE131Packet(e131_packet_t* p, IPAddress clientIP, byte protocol, IPAddress receivingIP){
 
   int uni = 0, dmxChannels = 0;
   uint8_t* e131_data = nullptr;
@@ -71,7 +71,7 @@ void handleE131Packet(e131_packet_t* p, IPAddress clientIP, byte protocol){
   if (protocol == P_ARTNET)
   {
     if (p->art_opcode == ARTNET_OPCODE_OPPOLL) {
-      handleArtnetPollReply(clientIP);
+      handleArtnetPollReply(clientIP, receivingIP);
       return;
     }
     uni = p->art_universe;
@@ -336,9 +336,9 @@ void handleDMXData(uint16_t uni, uint16_t dmxChannels, uint8_t* e131_data, uint8
   e131NewData = true;
 }
 
-void handleArtnetPollReply(IPAddress ipAddress) {
+void handleArtnetPollReply(IPAddress ipAddress, IPAddress replyFromIP) {
   ArtPollReply artnetPollReply;
-  prepareArtnetPollReply(&artnetPollReply);
+  prepareArtnetPollReply(&artnetPollReply, replyFromIP);
 
   unsigned startUniverse = e131Universe;
   unsigned endUniverse = e131Universe;
@@ -402,7 +402,7 @@ void handleArtnetPollReply(IPAddress ipAddress) {
   #endif
 }
 
-void prepareArtnetPollReply(ArtPollReply *reply) {
+void prepareArtnetPollReply(ArtPollReply *reply, IPAddress replyFromIP) {
   // Art-Net
   reply->reply_id[0] = 0x41;
   reply->reply_id[1] = 0x72;
@@ -415,9 +415,9 @@ void prepareArtnetPollReply(ArtPollReply *reply) {
 
   reply->reply_opcode = ARTNET_OPCODE_OPPOLLREPLY;
 
-  IPAddress localIP = Network.localIP();
+  // Use the IP that received the packet (interface-aware response)
   for (unsigned i = 0; i < 4; i++) {
-    reply->reply_ip[i] = localIP[i];
+    reply->reply_ip[i] = replyFromIP[i];
   }
 
   reply->reply_port = ARTNET_DEFAULT_PORT;
@@ -492,8 +492,9 @@ void prepareArtnetPollReply(ArtPollReply *reply) {
 
   Network.localMAC(reply->reply_mac);
 
+  // Use the IP that received the packet (interface-aware response)
   for (unsigned i = 0; i < 4; i++) {
-    reply->reply_bind_ip[i] = localIP[i];
+    reply->reply_bind_ip[i] = replyFromIP[i];
   }
 
   reply->reply_bind_index = 1;

@@ -891,6 +891,23 @@ void serializeInfo(JsonObject root)
     sprintf(s, "%d.%d.%d.%d", localIP[0], localIP[1], localIP[2], localIP[3]);
   }
   root["ip"] = s;
+
+  // Dual-interface support - show both IPs when available
+  #if defined(ARDUINO_ARCH_ESP32) && defined(WLED_USE_ETHERNET)
+  if (Network.isEthernetUp()) {
+    IPAddress ethIP = Network.ethernetIP();
+    char ethStr[16];
+    sprintf(ethStr, "%d.%d.%d.%d", ethIP[0], ethIP[1], ethIP[2], ethIP[3]);
+    root["eth_ip"] = ethStr;
+  }
+  #endif
+
+  if (Network.isWiFiUp()) {
+    IPAddress wifiIP = Network.wifiIP();
+    char wifiStr[16];
+    sprintf(wifiStr, "%d.%d.%d.%d", wifiIP[0], wifiIP[1], wifiIP[2], wifiIP[3]);
+    root["wifi_ip"] = wifiStr;
+  }
 }
 
 void setPaletteColors(JsonArray json, CRGBPalette16 palette)
