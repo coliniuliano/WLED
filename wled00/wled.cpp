@@ -318,6 +318,29 @@ void WLED::loop()
     } else {
       DEBUG_PRINTLN(F("WiFi: Not connected"));
     }
+
+    // Access point status
+    if (apActive) {
+      IPAddress apIP = WiFi.softAPIP();
+      DEBUG_PRINTF_P(PSTR("AP: Active (SSID: %s)\n"), apSSID);
+      DEBUG_PRINTF_P(PSTR("  IP:      %u.%u.%u.%u\n"), apIP[0], apIP[1], apIP[2], apIP[3]);
+      DEBUG_PRINTF_P(PSTR("  Channel: %u cfg / %d actual%s\n"), (unsigned)apChannel, WiFi.channel(), apHide ? " (hidden)" : "");
+      DEBUG_PRINTF_P(PSTR("  Clients: %u  Mode: %d\n"), (unsigned)WiFi.softAPgetStationNum(), (int)WiFi.getMode());
+    } else {
+      DEBUG_PRINTF_P(PSTR("AP: Inactive (mode=%d)\n"), (int)WiFi.getMode());
+    }
+
+    // Connection state machine, to explain *why* nothing above is up
+    {
+      static const char* const apBehaviorNames[] = {"boot-no-conn", "no-conn", "always", "button-only", "temporary"};
+      DEBUG_PRINTF_P(PSTR("Conn: wifiCfg=%d nets=%u sel=%d scan=%d apBehavior=%d(%s)\n"),
+                     (int)WLED_WIFI_CONFIGURED, (unsigned)multiWiFi.size(), (int)selectedWiFi,
+                     (int)WiFi.scanComplete(), (int)apBehavior,
+                     apBehavior < 5 ? apBehaviorNames[apBehavior] : "?");
+      DEBUG_PRINTF_P(PSTR("      lastReconnect=%lus ifacesInited=%d wasConnected=%d forceReconnect=%d\n"),
+                     lastReconnectAttempt/1000, (int)interfacesInited, (int)wasConnected, (int)forceReconnect);
+    }
+
     if (loops > 0) { // avoid division by zero
       DEBUG_PRINTF_P(PSTR("Loops/sec: %u\n"),         loops / 30);
       DEBUG_PRINTF_P(PSTR("Loop time[ms]: %u/%lu\n"), avgLoopMillis/loops,    maxLoopMillis);
@@ -644,7 +667,10 @@ void WLED::initAP(bool resetAP)
   DEBUG_PRINT(F("Opening access point "));
   DEBUG_PRINTLN(apSSID);
   WiFi.softAPConfig(IPAddress(4, 3, 2, 1), IPAddress(4, 3, 2, 1), IPAddress(255, 255, 255, 0));
-  WiFi.softAP(apSSID, apPass, apChannel, apHide);
+  bool apOk = WiFi.softAP(apSSID, apPass, apChannel, apHide);
+  DEBUG_PRINTF_P(PSTR("softAP(ch=%u hide=%u apPskLen=%u) -> %d, mode=%d, mac=%s\n"),
+                 (unsigned)apChannel, (unsigned)apHide, (unsigned)strlen(apPass),
+                 (int)apOk, (int)WiFi.getMode(), WiFi.softAPmacAddress().c_str());
   #ifdef ARDUINO_ARCH_ESP32
   WiFi.setTxPower(wifi_power_t(txPower));
   #endif
@@ -697,6 +723,10 @@ void WLED::initConnection()
   } else {
     WiFi.config(IPAddress((uint32_t)0), IPAddress((uint32_t)0), IPAddress((uint32_t)0));
   }
+
+  // WLED drives reconnection itself (see handleConnection); disable the core's own
+  // retry loop so it can't churn/retune the radio and starve the soft-AP beacon
+  WiFi.setAutoReconnect(false);
 
   lastReconnectAttempt = millis();
 
@@ -900,72 +930,68 @@ void WLED::handleConnection()
   }
 
   #if defined(ARDUINO_ARCH_ESP32) && defined(WLED_USE_ETHERNET)
-  // Only handle DHCP/link-local if NOT using static IP
-  // Static IP is indicated by ethernetDhcpStartTime == 0 (set in network.cpp ETH_CONNECTED event)
-  if (ethernetDhcpStartTime > 0 && !ethernetLinkLocalAssigned && ETH.linkUp()) {
-    // DHCP was requested (not static IP), link is up, and we haven't assigned link-local yet
-    if (now - ethernetDhcpStartTime > 250) { // 250ms timeout (fast fallback for streaming)
-      if (ETH.localIP()[0] == 0) {
-        // Still no IP after 250ms, assign link-local (APIPA) 169.254.x.x
-        DEBUG_PRINTLN(F("ETH: DHCP timeout, assigning link-local IP (APIPA)"));
+  // DHCP with link-local (APIPA) fallback. Skipped entirely when a static IP is
+  // configured, which network.cpp signals by leaving ethernetDhcpStartTime at 0.
+  //
+  // Fall back fast so streaming has a usable address, then re-probe for a DHCP
+  // server occasionally. A re-probe MUST hand the address back if it finds
+  // nothing: ETH.config(INADDR_NONE,...) clears the current IP in order to start
+  // the DHCP client, so without a restore the interface is left with no address.
+  static constexpr unsigned long ETH_FALLBACK_MS    =   250; // wait before APIPA
+  static constexpr unsigned long ETH_PROBE_EVERY_MS = 30000; // gap between re-probes
+  static constexpr unsigned long ETH_PROBE_WAIT_MS  =  4000; // DHCP wait per re-probe
+  static const IPAddress ethLinkLocalGW(169, 254, 1, 1);
+  static const IPAddress ethLinkLocalSN(255, 255, 0, 0);
 
-        // Generate random IP in 169.254.1.0 - 169.254.254.255 range
-        // Avoid .0 and .255 in last octet
-        uint8_t third = random(1, 255);
-        uint8_t fourth = random(1, 255);
-        IPAddress linkLocalIP(169, 254, third, fourth);
-        IPAddress linkLocalGW(169, 254, 1, 1);
-        IPAddress linkLocalSN(255, 255, 0, 0);
+  static IPAddress ethLinkLocalIP;          // remembered so the address is stable
+  static unsigned long ethProbeStart = 0;   // non-zero while a re-probe is running
 
-        ETH.config(linkLocalIP, linkLocalGW, linkLocalSN);
+  if (ETH.linkUp() && ethernetDhcpStartTime > 0) {
+    const IPAddress ethIP = ETH.localIP();
+    const bool routable = ethIP[0] != 0 && ethIP[0] != 169;
 
-        DEBUG_PRINT(F("ETH: Link-local IP: ")); DEBUG_PRINTLN(linkLocalIP);
-        DEBUG_PRINT(F("ETH: Gateway: ")); DEBUG_PRINTLN(linkLocalGW);
-        DEBUG_PRINT(F("ETH: Subnet: ")); DEBUG_PRINTLN(linkLocalSN);
-
-        ethernetLinkLocalAssigned = true;
-        ethernetDhcpStartTime = now; // Keep timestamp for periodic DHCP retry
-      } else {
-        // Got an IP from DHCP (or static IP was already applied)
-        DEBUG_PRINT(F("ETH: IP configured: ")); DEBUG_PRINTLN(ETH.localIP());
-        ethernetDhcpStartTime = 0;
-      }
-    }
-  }
-
-  // If using link-local IP, periodically retry DHCP with exponential backoff
-  // Fast retries initially (for quick DHCP server response), then backoff to 10-15 seconds
-  // This ONLY runs when link-local is active (not static IP, not DHCP success)
-  if (ethernetLinkLocalAssigned && ETH.linkUp() && ethernetDhcpStartTime > 0) {
-    static uint8_t dhcpRetryCount = 0;
-    unsigned long dhcpRetryInterval;
-
-    // Exponential backoff: 500ms, 1s, 2s, 4s, then settle at 12s
-    if (dhcpRetryCount == 0) {
-      dhcpRetryInterval = 500;  // First retry very quick
-    } else if (dhcpRetryCount == 1) {
-      dhcpRetryInterval = 1000; // Second retry 1s
-    } else if (dhcpRetryCount == 2) {
-      dhcpRetryInterval = 2000; // Third retry 2s
-    } else if (dhcpRetryCount == 3) {
-      dhcpRetryInterval = 4000; // Fourth retry 4s
-    } else {
-      dhcpRetryInterval = 12000; // Settle at 12s for ongoing checks
-    }
-
-    if (now - ethernetDhcpStartTime > dhcpRetryInterval) {
-      DEBUG_PRINTF_P(PSTR("ETH: Link-local active, retrying DHCP (attempt %d)...\n"), dhcpRetryCount + 1);
-      ETH.config(INADDR_NONE, INADDR_NONE, INADDR_NONE); // Re-enable DHCP
-      ethernetDhcpStartTime = now; // Reset timer for next check
-      dhcpRetryCount++;
-      // Don't reset ethernetLinkLocalAssigned yet - will be reset when DHCP succeeds
-    }
-    // Check if DHCP succeeded
-    if (ETH.localIP()[0] != 0 && ETH.localIP()[0] != 169) { // Got non-link-local IP
-      DEBUG_PRINT(F("ETH: DHCP now available! Switched to: ")); DEBUG_PRINTLN(ETH.localIP());
+    if (routable) {
+      // DHCP answered, either the initial attempt or a later re-probe
+      DEBUG_PRINT(F("ETH: DHCP address: ")); DEBUG_PRINTLN(ethIP);
       ethernetLinkLocalAssigned = false;
       ethernetDhcpStartTime = 0;
-      dhcpRetryCount = 0; // Reset retry counter for next time
+      ethProbeStart = 0;
+    } else if (!ethernetLinkLocalAssigned) {
+      // Initial DHCP attempt still outstanding
+      if (now - ethernetDhcpStartTime > ETH_FALLBACK_MS) {
+        // Derive the host part from the MAC: stable across reboots and unique
+        // between boards. random() is unseeded this early, so it would hand
+        // every identical device the same address.
+        uint8_t mac[6] = {0};
+        Network.localMAC(mac);
+        uint8_t third  = mac[4];
+        uint8_t fourth = mac[5];
+        if (third == 0 || third == 255) third = 1;              // avoid 169.254.0/255.x
+        if (fourth == 0 || fourth == 255) fourth = 1;           // avoid .0 and .255
+        ethLinkLocalIP = IPAddress(169, 254, third, fourth);
+
+        DEBUG_PRINTLN(F("ETH: DHCP timeout, assigning link-local IP (APIPA)"));
+        ETH.config(ethLinkLocalIP, ethLinkLocalGW, ethLinkLocalSN);
+        DEBUG_PRINT(F("ETH: Link-local IP: ")); DEBUG_PRINTLN(ethLinkLocalIP);
+
+        ethernetLinkLocalAssigned = true;
+        ethernetDhcpStartTime = now; // doubles as the re-probe clock
+        ethProbeStart = 0;           // clear any probe left over from a link bounce
+      }
+    } else if (ethProbeStart == 0) {
+      // Link-local is up and must stay up. Re-probe for a DHCP server now and
+      // then, in case one appears later than we were willing to wait.
+      if (now - ethernetDhcpStartTime > ETH_PROBE_EVERY_MS) {
+        DEBUG_PRINTLN(F("ETH: re-probing for DHCP..."));
+        ETH.config(INADDR_NONE, INADDR_NONE, INADDR_NONE); // clears IP, starts DHCP
+        ethProbeStart = now;
+      }
+    } else if (now - ethProbeStart > ETH_PROBE_WAIT_MS) {
+      // Re-probe found nothing, so put the link-local address back
+      DEBUG_PRINT(F("ETH: no DHCP offer, restoring ")); DEBUG_PRINTLN(ethLinkLocalIP);
+      ETH.config(ethLinkLocalIP, ethLinkLocalGW, ethLinkLocalSN);
+      ethProbeStart = 0;
+      ethernetDhcpStartTime = now; // restart the re-probe clock
     }
   }
   #endif

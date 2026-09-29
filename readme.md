@@ -62,3 +62,14 @@ This setup allows a W5500 module to work with an ESP32-S3 to receive DMX (and po
   - Required for W5500 functions not in Tasmota build
   - ESP-IDF 4.4+ minimum for ETHClass2 support
 
+
+# TODO
+
+- more control over serial port
+  - set up wifi and ip addresses
+- no access point?
+   - wifi is shit on this board, cant get AP and cant connect to wifi
+
+- cant do dhcp AND have a static address in software
+   CONFIG_LWIP_AUTOIP is not set — so the textbook answer is off the table for you.
+   lwIP has an AUTOIP module with a LWIP_DHCP_AUTOIP_COOP mode built for exactly this: it holds a 169.254 address while the DHCP client keeps discovering in the background, then switches cleanly when a lease arrives. But it isn't compiled into the prebuilt lwIP that arduino-esp32 ships, so you'd need a custom framework build to get it.
