@@ -255,6 +255,9 @@ void espNowReceiveCB(uint8_t* address, uint8_t* data, uint8_t len, signed int rs
 
 //network.cpp
 bool initEthernet(); // result is informational
+#if defined(ARDUINO_ARCH_ESP32) && defined(WLED_USE_ETHERNET)
+void applyEthernetLinkLocal(); // RFC 3927 APIPA address, used instead of DHCP
+#endif
 int  getSignalQuality(int rssi);
 void fillMAC2Str(char *str, const uint8_t *mac);
 void fillStr2MAC(uint8_t *mac, const char *str);

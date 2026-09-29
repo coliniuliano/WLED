@@ -2,7 +2,16 @@
   #include <ESP8266WiFi.h>
 #else // ESP32
   #include <WiFi.h>
-  #include <ETH.h>
+  // MUST match the ETH selection in wled.h. Network.cpp does not include wled.h,
+  // so without this it binds to arduino's stock `extern ETHClass ETH` -- an object
+  // ETH.begin() was never called on, whose handle and netif are NULL. Everything
+  // here then reports the interface as down while the real one is up.
+  #if defined(ARDUINO_ARCH_ESP32S3) && defined(WLED_USE_ETHERNET)
+    #include <ETHClass2.h>
+    #define ETH ETH2
+  #else
+    #include <ETH.h>
+  #endif
 #endif
 
 #ifndef Network_h

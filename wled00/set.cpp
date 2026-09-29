@@ -138,21 +138,15 @@ void handleSettingsSet(AsyncWebServerRequest *request, byte subPage)
       // Only IP settings changed and Ethernet is active - reconfigure without reboot
       DEBUG_PRINTLN(F("ETH: Reconfiguring IP address..."));
       if (ethernetStaticIP != (uint32_t)0x00000000) {
-        // Static IP configured (gateway can be 0.0.0.0 for link-local)
+        // Static IP configured (gateway may be 0.0.0.0 for an off-router segment)
         ETH.config(ethernetStaticIP, ethernetStaticGW, ethernetStaticSN, dnsAddress);
+        ethernetLinkLocalAssigned = false;
         DEBUG_PRINT(F("ETH: Static IP: ")); DEBUG_PRINTLN(ethernetStaticIP);
         DEBUG_PRINT(F("ETH: Gateway: ")); DEBUG_PRINTLN(ethernetStaticGW);
         DEBUG_PRINT(F("ETH: Subnet: ")); DEBUG_PRINTLN(ethernetStaticSN);
-        // Reset DHCP/link-local state since we're using static IP now
-        ethernetDhcpStartTime = 0;
-        ethernetLinkLocalAssigned = false;
       } else {
-        // No static IP - use DHCP with auto link-local fallback
-        ETH.config(INADDR_NONE, INADDR_NONE, INADDR_NONE);
-        DEBUG_PRINTLN(F("ETH: Switched to DHCP"));
-        // Start DHCP timer for auto link-local fallback
-        ethernetDhcpStartTime = millis();
-        ethernetLinkLocalAssigned = false;
+        // Static IP cleared - fall back to link-local (no DHCP)
+        applyEthernetLinkLocal();
       }
     }
 

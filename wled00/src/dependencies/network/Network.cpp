@@ -12,8 +12,7 @@ IPAddress NetworkClass::localIP()
 
     // ETH.localIP() returns 0.0.0.0 but link is up - check if static IP is configured
     extern IPAddress ethernetStaticIP;
-    extern unsigned long ethernetDhcpStartTime;
-    if (ethernetStaticIP != (uint32_t)0x00000000 && ethernetDhcpStartTime == 0) {
+    if (ethernetStaticIP != (uint32_t)0x00000000) {
       // Static IP configured, return it
       return ethernetStaticIP;
     }
@@ -38,8 +37,7 @@ IPAddress NetworkClass::subnetMask()
     // ETH.localIP() returns 0.0.0.0 but link is up - check if static subnet is configured
     extern IPAddress ethernetStaticIP;
     extern IPAddress ethernetStaticSN;
-    extern unsigned long ethernetDhcpStartTime;
-    if (ethernetStaticIP != (uint32_t)0x00000000 && ethernetDhcpStartTime == 0) {
+    if (ethernetStaticIP != (uint32_t)0x00000000) {
       return ethernetStaticSN;
     }
   }
@@ -61,8 +59,7 @@ IPAddress NetworkClass::gatewayIP()
     // ETH.localIP() returns 0.0.0.0 but link is up - check if static gateway is configured
     extern IPAddress ethernetStaticIP;
     extern IPAddress ethernetStaticGW;
-    extern unsigned long ethernetDhcpStartTime;
-    if (ethernetStaticIP != (uint32_t)0x00000000 && ethernetDhcpStartTime == 0) {
+    if (ethernetStaticIP != (uint32_t)0x00000000) {
       return ethernetStaticGW;
     }
   }
@@ -118,9 +115,8 @@ bool NetworkClass::isEthernet()
   // ETH.localIP() might return 0.0.0.0 with some drivers (like W5500) even when static IP is configured
   // Check if we have a static IP configured - if so, trust the link status
   extern IPAddress ethernetStaticIP;
-  extern unsigned long ethernetDhcpStartTime;
-  if (ethernetStaticIP != (uint32_t)0x00000000 && ethernetDhcpStartTime == 0) {
-    // Static IP is configured (ethernetDhcpStartTime == 0 means not using DHCP)
+  if (ethernetStaticIP != (uint32_t)0x00000000) {
+    // Static IP is configured
     return true;
   }
 
@@ -139,8 +135,7 @@ IPAddress NetworkClass::ethernetIP()
 
     // Fallback to configured static IP
     extern IPAddress ethernetStaticIP;
-    extern unsigned long ethernetDhcpStartTime;
-    if (ethernetStaticIP != (uint32_t)0x00000000 && ethernetDhcpStartTime == 0) {
+    if (ethernetStaticIP != (uint32_t)0x00000000) {
       return ethernetStaticIP;
     }
   }
@@ -156,8 +151,7 @@ IPAddress NetworkClass::ethernetSubnetMask()
 
     extern IPAddress ethernetStaticIP;
     extern IPAddress ethernetStaticSN;
-    extern unsigned long ethernetDhcpStartTime;
-    if (ethernetStaticIP != (uint32_t)0x00000000 && ethernetDhcpStartTime == 0) {
+    if (ethernetStaticIP != (uint32_t)0x00000000) {
       return ethernetStaticSN;
     }
   }
@@ -173,8 +167,7 @@ IPAddress NetworkClass::ethernetGatewayIP()
 
     extern IPAddress ethernetStaticIP;
     extern IPAddress ethernetStaticGW;
-    extern unsigned long ethernetDhcpStartTime;
-    if (ethernetStaticIP != (uint32_t)0x00000000 && ethernetDhcpStartTime == 0) {
+    if (ethernetStaticIP != (uint32_t)0x00000000) {
       return ethernetStaticGW;
     }
   }

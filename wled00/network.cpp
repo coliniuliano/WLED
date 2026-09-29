@@ -149,6 +149,30 @@ const ethernet_settings ethernetBoards[] = {
   #endif
 };
 
+// Assign an RFC 3927 link-local (APIPA) address to the Ethernet interface.
+// DHCP is deliberately not used: the segments this runs on have no DHCP server,
+// and a single netif cannot hold a static address while the DHCP client probes
+// (starting the client zeroes the address). Revisit if CONFIG_LWIP_AUTOIP ever
+// becomes available in the prebuilt lwIP -- its DHCP co-op mode does both.
+//
+// The host part comes from the MAC so the address is stable across reboots and
+// unique between boards.
+void applyEthernetLinkLocal()
+{
+  uint8_t mac[6] = {0};
+  Network.localMAC(mac);
+  uint8_t third  = mac[4];
+  uint8_t fourth = mac[5];
+  if (third  == 0 || third  == 255) third  = 1; // avoid 169.254.0.x / 169.254.255.x
+  if (fourth == 0 || fourth == 255) fourth = 1; // avoid .0 and .255
+
+  IPAddress ip(169, 254, third, fourth);
+  ETH.config(ip, IPAddress(169, 254, 1, 1), IPAddress(255, 255, 0, 0));
+  ethernetLinkLocalAssigned = true;
+
+  DEBUG_PRINT(F("ETH: link-local IP: ")); DEBUG_PRINTLN(ip);
+}
+
 bool initEthernet()
 {
   static bool successfullyConfiguredEthernet = false;
@@ -445,31 +469,19 @@ void WiFiEvent(WiFiEvent_t event)
       // Keep WiFi active - dual-interface mode enabled
       // Both Ethernet and WiFi can coexist and serve traffic simultaneously
 
-      // Check if static IP is configured (IP must be non-zero; gateway can be 0.0.0.0 for link-local)
-      DEBUG_PRINTF_P(PSTR("ETH-E: Static IP config check - IP: %u.%u.%u.%u, GW: %u.%u.%u.%u\n"),
-                     ethernetStaticIP[0], ethernetStaticIP[1], ethernetStaticIP[2], ethernetStaticIP[3],
-                     ethernetStaticGW[0], ethernetStaticGW[1], ethernetStaticGW[2], ethernetStaticGW[3]);
-
       if (ethernetStaticIP != (uint32_t)0x00000000) {
-        // Static IP configured - use it immediately (gateway can be 0.0.0.0 for link-local IPs)
-        DEBUG_PRINTLN(F("ETH-E: Using STATIC IP (no DHCP/link-local)"));
+        // Static IP configured (gateway may be 0.0.0.0 for an off-router segment)
+        DEBUG_PRINTLN(F("ETH-E: using static IP"));
         ETH.config(ethernetStaticIP, ethernetStaticGW, ethernetStaticSN, dnsAddress);
-        DEBUG_PRINT(F("ETH-E: Configured Static IP: ")); DEBUG_PRINTLN(ethernetStaticIP);
+        ethernetLinkLocalAssigned = false;
+        DEBUG_PRINT(F("ETH-E: IP: "));      DEBUG_PRINTLN(ethernetStaticIP);
         DEBUG_PRINT(F("ETH-E: Gateway: ")); DEBUG_PRINTLN(ethernetStaticGW);
-        DEBUG_PRINT(F("ETH-E: Subnet: ")); DEBUG_PRINTLN(ethernetStaticSN);
-        // Check what ETH.localIP() returns after config
-        delay(10); // Small delay to let config apply
-        DEBUG_PRINT(F("ETH-E: Actual ETH.localIP(): ")); DEBUG_PRINTLN(ETH.localIP());
-        DEBUG_PRINT(F("ETH-E: Link up? ")); DEBUG_PRINTLN(ETH.linkUp() ? "YES" : "NO");
-        ethernetDhcpStartTime = 0; // Not using DHCP (important: this prevents auto link-local fallback)
-        ethernetLinkLocalAssigned = false;
+        DEBUG_PRINT(F("ETH-E: Subnet: "));  DEBUG_PRINTLN(ethernetStaticSN);
       } else {
-        // No static IP - use DHCP with auto link-local fallback
-        DEBUG_PRINTLN(F("ETH-E: No static IP configured, using DHCP with auto link-local fallback"));
-        ETH.config(INADDR_NONE, INADDR_NONE, INADDR_NONE);
-        ethernetDhcpStartTime = millis(); // Start DHCP timer
-        ethernetLinkLocalAssigned = false;
+        // No static IP: go straight to link-local, no DHCP attempt
+        applyEthernetLinkLocal();
       }
+      DEBUG_PRINT(F("ETH-E: ETH.localIP(): ")); DEBUG_PRINTLN(ETH.localIP());
       // convert the "serverDescription" into a valid DNS hostname (alphanumeric)
       char hostname[64];
       prepareHostname(hostname);
@@ -479,9 +491,7 @@ void WiFiEvent(WiFiEvent_t event)
       }
     case ARDUINO_EVENT_ETH_DISCONNECTED:
       DEBUG_PRINTLN(F("ETH-E: Disconnected"));
-      // Reset DHCP/link-local state on disconnect
-      ethernetDhcpStartTime = 0;
-      ethernetLinkLocalAssigned = false;
+      ethernetLinkLocalAssigned = false; // re-applied on the next ETH_CONNECTED
       // This doesn't really affect ethernet per se,
       // as it's only configured once.  Rather, it
       // may be necessary to reconnect the WiFi when
