@@ -131,11 +131,17 @@ void appendGPIOinfo(Print& settingsScript)
   #if defined(ARDUINO_ARCH_ESP32) && defined(WLED_USE_ETHERNET)
   if (ethernetType != WLED_ETH_NONE && ethernetType < WLED_NUM_ETH_TYPES) {
     if (!firstPin) settingsScript.print(',');
+    #if defined(ARDUINO_ARCH_ESP32S3)
+    // SPI PHY -- see the matching note in cfg.cpp; ethernetBoards[] must not be
+    // indexed by WLED_ETH_W5500 on S3.
+    if (ethernetType == WLED_ETH_W5500) {
+      for (unsigned p=0; p<WLED_ETH_W5500_PINS_COUNT; p++) { settingsScript.printf("%d,",w5500_ethernet_pins[p].pin); }
+    }
+    #else
     for (unsigned p=0; p<WLED_ETH_RSVD_PINS_COUNT; p++) { settingsScript.printf("%d,",esp32_nonconfigurable_ethernet_pins[p].pin); }
     if (ethernetBoards[ethernetType].eth_power >= 0)    { settingsScript.printf("%d,",ethernetBoards[ethernetType].eth_power); }
     if (ethernetBoards[ethernetType].eth_mdc >= 0)      { settingsScript.printf("%d,",ethernetBoards[ethernetType].eth_mdc); }
     if (ethernetBoards[ethernetType].eth_mdio >= 0)     { settingsScript.printf("%d,",ethernetBoards[ethernetType].eth_mdio); }
-    #ifndef CONFIG_IDF_TARGET_ESP32S3
     switch (ethernetBoards[ethernetType].eth_clk_mode)  {
       case ETH_CLOCK_GPIO0_IN:
       case ETH_CLOCK_GPIO0_OUT:

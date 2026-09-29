@@ -32,6 +32,23 @@ extern const ethernet_settings ethernetBoards[];
 
 #define WLED_ETH_RSVD_PINS_COUNT 6
 extern const managed_pin_type esp32_nonconfigurable_ethernet_pins[WLED_ETH_RSVD_PINS_COUNT];
+
+// W5500 SPI Ethernet, hardcoded for the current ESP32-S3 board. Declared here
+// rather than inside initEthernet() so the settings pages can report the pins
+// actually in use -- ethernetBoards[] has no W5500 entry on S3 (its contents are
+// RMII-only and compiled out), so it must not be indexed by WLED_ETH_W5500.
+#if defined(ARDUINO_ARCH_ESP32S3)
+  #define ETH_MISO_PIN 13
+  #define ETH_MOSI_PIN 11
+  #define ETH_SCLK_PIN 12
+  #define ETH_CS_PIN   10
+  #define ETH_INT_PIN   9
+  #define ETH_RST_PIN   8
+  #define ETH_ADDR      1
+
+  #define WLED_ETH_W5500_PINS_COUNT 6
+  extern const managed_pin_type w5500_ethernet_pins[WLED_ETH_W5500_PINS_COUNT];
+#endif
 #endif
 
 #endif

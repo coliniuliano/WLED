@@ -406,6 +406,16 @@ void WLED::setup()
   #if !ARDUINO_USB_CDC_ON_BOOT
   Serial.setTimeout(50);  // this causes troubles on new MCUs that have a "virtual" USB Serial (HWCDC)
   #else
+  // Keep writes non-blocking when no USB host is draining the port. HWCDC raises
+  // its TX timeout from 0 to 100ms the first time it sees a USB connection and
+  // never lowers it, after which any write() with a full TX ring blocks up to
+  // 100ms per chunk. On a board powered without USB (e.g. PoE) floating D+/D- can
+  // trip that detection with nothing reading the buffer; with WLED_DEBUG the
+  // "Loop delayed" print then re-triggers itself every iteration and the main
+  // loop livelocks - no web, no pings, and handleSerial() never sees a restart
+  // command either. Pinning the timeout at 0 drops debug output during bursts
+  // instead of stalling on it.
+  Serial.setTxTimeoutMs(0);
   #endif
   #if defined(WLED_DEBUG) && defined(ARDUINO_ARCH_ESP32) && (defined(CONFIG_IDF_TARGET_ESP32S2) || defined(CONFIG_IDF_TARGET_ESP32C3) || ARDUINO_USB_CDC_ON_BOOT)
   delay(2500);  // allow CDC USB serial to initialise
@@ -928,6 +938,17 @@ void WLED::handleConnection()
       }
     }
   }
+
+  #if defined(ARDUINO_ARCH_ESP32) && defined(WLED_USE_ETHERNET)
+  // Catch a missed ETH_CONNECTED: ETH.begin() happens during config load, before
+  // WiFi.onEvent() is registered in setup(), so on a cold boot with the cable
+  // already in the link can come up and the event fire with nothing listening.
+  // The netif is up either way, so poll for "link up but no address" and fix it.
+  if (ETH.linkUp() && ETH.localIP()[0] == 0) {
+    DEBUG_PRINTLN(F("ETH: link up with no address, applying config"));
+    applyEthernetConfig();
+  }
+  #endif
 
   if (Network.isConnected() && !interfacesInited) { //newly connected
     DEBUG_PRINTLN();

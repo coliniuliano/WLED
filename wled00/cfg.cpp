@@ -912,11 +912,17 @@ void serializeConfig(JsonObject root) {
   ethernet["type"] = ethernetType;
   if (ethernetType != WLED_ETH_NONE && ethernetType < WLED_NUM_ETH_TYPES) {
     JsonArray pins = ethernet.createNestedArray("pin");
+    #if defined(ARDUINO_ARCH_ESP32S3)
+    // SPI PHY. ethernetBoards[] is RMII-only and compiled out on S3, leaving just
+    // the "none" entry, so indexing it by WLED_ETH_W5500 would read past the end.
+    if (ethernetType == WLED_ETH_W5500) {
+      for (unsigned p=0; p<WLED_ETH_W5500_PINS_COUNT; p++) pins.add(w5500_ethernet_pins[p].pin);
+    }
+    #else
     for (unsigned p=0; p<WLED_ETH_RSVD_PINS_COUNT; p++) pins.add(esp32_nonconfigurable_ethernet_pins[p].pin);
     if (ethernetBoards[ethernetType].eth_power>=0)     pins.add(ethernetBoards[ethernetType].eth_power);
     if (ethernetBoards[ethernetType].eth_mdc>=0)       pins.add(ethernetBoards[ethernetType].eth_mdc);
     if (ethernetBoards[ethernetType].eth_mdio>=0)      pins.add(ethernetBoards[ethernetType].eth_mdio);
-    #ifndef CONFIG_IDF_TARGET_ESP32S3
     switch (ethernetBoards[ethernetType].eth_clk_mode) {
       case ETH_CLOCK_GPIO0_IN:
       case ETH_CLOCK_GPIO0_OUT:

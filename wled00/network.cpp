@@ -16,6 +16,18 @@ const managed_pin_type esp32_nonconfigurable_ethernet_pins[WLED_ETH_RSVD_PINS_CO
     { 27, true  }, // RMII EMAC CRS_DV == Carrier Sense and RX Data Valid
 };
 
+#if defined(ARDUINO_ARCH_ESP32S3)
+// W5500 SPI PHY pins (see wled_ethernet.h). None of the RMII pins above apply.
+const managed_pin_type w5500_ethernet_pins[WLED_ETH_W5500_PINS_COUNT] = {
+    { ETH_MISO_PIN, false },
+    { ETH_MOSI_PIN, true  },
+    { ETH_SCLK_PIN, true  },
+    { ETH_CS_PIN,   true  },
+    { ETH_INT_PIN,  false },
+    { ETH_RST_PIN,  true  },
+};
+#endif
+
 const ethernet_settings ethernetBoards[] = {
   // None
   {
@@ -173,6 +185,28 @@ void applyEthernetLinkLocal()
   DEBUG_PRINT(F("ETH: link-local IP: ")); DEBUG_PRINTLN(ip);
 }
 
+// Give the Ethernet interface its address: the configured static IP, or link-local.
+// Called from the ETH_CONNECTED event and, as a safety net, from handleConnection()
+// -- ETH.begin() runs during config load, well before WiFi.onEvent() is registered
+// in setup(), so on a cold boot with the cable already connected the link can come
+// up and the event fire with no handler attached. esp_netif still brings the netif
+// up, so everything looks healthy while the interface has no address at all.
+// Idempotent: safe to call again, and a no-op once an address is set.
+void applyEthernetConfig()
+{
+  if (ethernetStaticIP != (uint32_t)0x00000000) {
+    DEBUG_PRINTLN(F("ETH: using static IP"));
+    ETH.config(ethernetStaticIP, ethernetStaticGW, ethernetStaticSN, dnsAddress);
+    ethernetLinkLocalAssigned = false;
+    DEBUG_PRINT(F("ETH: IP: "));      DEBUG_PRINTLN(ethernetStaticIP);
+    DEBUG_PRINT(F("ETH: Gateway: ")); DEBUG_PRINTLN(ethernetStaticGW);
+    DEBUG_PRINT(F("ETH: Subnet: "));  DEBUG_PRINTLN(ethernetStaticSN);
+  } else {
+    applyEthernetLinkLocal();
+  }
+  DEBUG_PRINT(F("ETH: ETH.localIP(): ")); DEBUG_PRINTLN(ETH.localIP());
+}
+
 bool initEthernet()
 {
   static bool successfullyConfiguredEthernet = false;
@@ -194,33 +228,15 @@ bool initEthernet()
   // W5500 SPI Ethernet (T-ETH-Lite S3)
   #if defined(ARDUINO_ARCH_ESP32S3)
   if (ethernetType == WLED_ETH_W5500) {
-    #define ETH_MISO_PIN 13
-    #define ETH_MOSI_PIN 11
-    #define ETH_SCLK_PIN 12
-    #define ETH_CS_PIN   10
-    #define ETH_INT_PIN  9
-    #define ETH_RST_PIN  8
-    #define ETH_ADDR     1
-
-    managed_pin_type pinsToAllocate[6] = {
-      {ETH_MISO_PIN, false},
-      {ETH_MOSI_PIN, true},
-      {ETH_SCLK_PIN, true},
-      {ETH_CS_PIN, true},
-      {ETH_INT_PIN, false},
-      {ETH_RST_PIN, true}
-    };
-
-    if (!PinManager::allocateMultiplePins(pinsToAllocate, 6, PinOwner::Ethernet)) {
+    // pin numbers live in wled_ethernet.h so the settings pages can report them
+    if (!PinManager::allocateMultiplePins(w5500_ethernet_pins, WLED_ETH_W5500_PINS_COUNT, PinOwner::Ethernet)) {
       DEBUG_PRINTLN(F("initE: Failed to allocate W5500 SPI pins"));
       return false;
     }
 
     if (!ETH.begin(ETH_PHY_W5500, ETH_ADDR, ETH_CS_PIN, ETH_INT_PIN, ETH_RST_PIN, SPI3_HOST, ETH_SCLK_PIN, ETH_MISO_PIN, ETH_MOSI_PIN)) {
       DEBUG_PRINTLN(F("initE: ETH.begin() [SPI Ethernet W5500] failed"));
-      for (managed_pin_type mpt : pinsToAllocate) {
-        PinManager::deallocatePin(mpt.pin, PinOwner::Ethernet);
-      }
+      PinManager::deallocateMultiplePins(w5500_ethernet_pins, WLED_ETH_W5500_PINS_COUNT, PinOwner::Ethernet);
       return false;
     }
 
@@ -469,19 +485,7 @@ void WiFiEvent(WiFiEvent_t event)
       // Keep WiFi active - dual-interface mode enabled
       // Both Ethernet and WiFi can coexist and serve traffic simultaneously
 
-      if (ethernetStaticIP != (uint32_t)0x00000000) {
-        // Static IP configured (gateway may be 0.0.0.0 for an off-router segment)
-        DEBUG_PRINTLN(F("ETH-E: using static IP"));
-        ETH.config(ethernetStaticIP, ethernetStaticGW, ethernetStaticSN, dnsAddress);
-        ethernetLinkLocalAssigned = false;
-        DEBUG_PRINT(F("ETH-E: IP: "));      DEBUG_PRINTLN(ethernetStaticIP);
-        DEBUG_PRINT(F("ETH-E: Gateway: ")); DEBUG_PRINTLN(ethernetStaticGW);
-        DEBUG_PRINT(F("ETH-E: Subnet: "));  DEBUG_PRINTLN(ethernetStaticSN);
-      } else {
-        // No static IP: go straight to link-local, no DHCP attempt
-        applyEthernetLinkLocal();
-      }
-      DEBUG_PRINT(F("ETH-E: ETH.localIP(): ")); DEBUG_PRINTLN(ETH.localIP());
+      applyEthernetConfig();
       // convert the "serverDescription" into a valid DNS hostname (alphanumeric)
       char hostname[64];
       prepareHostname(hostname);
