@@ -1,3 +1,30 @@
+> ## ⚠️ This branch is out of date — superseded by `w5500-ethernet-espidf5`
+>
+> **Status:** frozen reference. Known-working on hardware, but no longer the branch to build from.
+>
+> This branch forked from upstream WLED at `cc5b5047` (2025-12-03, `0.16.0-alpha`). Upstream has since
+> moved **1060+ commits** ahead, shipped **v16.0.0**, and is now on `17.0.0-devV5`. Critically, ESP32
+> builds migrated from **ESP-IDF 4.4 / arduino-esp32 2.0.9** to **ESP-IDF 5.x / arduino-esp32 3.x**.
+>
+> That migration makes this branch a dead end rather than something to merge forward:
+>
+> - The `espressif32 @ 5.4.0` platform pin here does not survive the jump.
+> - Both library forks this branch depends on — [`ETHClass2`](https://github.com/coliniuliano/ETHClass2)
+>   and [`TroyHacksAsyncUDP`](https://github.com/coliniuliano/TroyHacksAsyncUDP) — exist *only* to work
+>   around IDF 4.4 limitations. arduino-esp32 3.x has **native W5500 SPI Ethernet** in the stock `ETH`
+>   class, so they become unnecessary rather than needing porting.
+> - Upstream renamed `Network` → `WLEDNetwork` and ran a sweeping "encapsulate globals as static"
+>   refactor across exactly the files this branch modifies (`network.cpp`, `e131.cpp`, `util.cpp`,
+>   `set.cpp`, `wled_server.cpp`, `wled.h`). A textual merge resolves cleanly and then fails to
+>   compile — the worst outcome, because it looks finished.
+>
+> **Work continues on [`w5500-ethernet-espidf5`](../../tree/w5500-ethernet-espidf5)**, re-implemented
+> from scratch on current upstream `main` against the native IDF5 SPI Ethernet driver. The design below
+> carried over; the code did not. See `MIGRATION-NOTES.md` on that branch for the decision log.
+>
+> Two tags pin this branch's history in place: `attempt1-base` (the fork point) and `attempt1-working`
+> (the last known-good-on-hardware commit), so this reference survives even if the branch is deleted.
+
 # WLED modified for W5500 support for sACN/E1.31 lighting
 
 The goal of this project is to use LED strips with sACN, ArtNet, or whatever DMX protocol while
