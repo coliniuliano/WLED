@@ -134,6 +134,13 @@ static void appendGPIOinfo(Print& settingsScript)
   #if defined(ARDUINO_ARCH_ESP32) && defined(WLED_USE_ETHERNET)
   if (ethernetType != WLED_ETH_NONE && ethernetType < WLED_NUM_ETH_TYPES) {
     if (!firstPin) settingsScript.print(',');
+  #ifdef WLED_ETH_HAS_SPI
+    if (isSpiEthernet(ethernetType)) {
+      for (unsigned p=0; p<WLED_ETH_SPI_PINS_COUNT; p++) { settingsScript.printf("%d,",esp32_spi_ethernet_pins[p].pin); }
+    }
+  #endif
+  #ifdef WLED_ETH_HAS_RMII
+   if (!isSpiEthernet(ethernetType)) {
     for (unsigned p=0; p<WLED_ETH_RSVD_PINS_COUNT; p++) { settingsScript.printf("%d,",esp32_nonconfigurable_ethernet_pins[p].pin); }
     if (ethernetBoards[ethernetType].eth_power >= 0)    { settingsScript.printf("%d,",ethernetBoards[ethernetType].eth_power); }
     if (ethernetBoards[ethernetType].eth_mdc >= 0)      { settingsScript.printf("%d,",ethernetBoards[ethernetType].eth_mdc); }
@@ -150,8 +157,10 @@ static void appendGPIOinfo(Print& settingsScript)
         settingsScript.print(17);
         break;
     }
+   }
+  #endif // WLED_ETH_HAS_RMII
   }
-  #endif
+  #endif // ARDUINO_ARCH_ESP32 && WLED_USE_ETHERNET
   settingsScript.print(F("];")); // rsvd
 
   // add info for read-only GPIO
@@ -295,6 +304,12 @@ void getSettingsJS(byte subPage, Print& settingsScript)
 
     #if defined(ARDUINO_ARCH_ESP32) && defined(WLED_USE_ETHERNET)
     printSetFormValue(settingsScript,PSTR("ETH"),ethernetType);
+    char ethField[4];
+    for (size_t i = 0; i < 4; i++) {
+      strcpy(ethField, "EI0"); ethField[2] = 48+i; printSetFormValue(settingsScript, ethField, ethernetStaticIP[i]);
+      strcpy(ethField, "EG0"); ethField[2] = 48+i; printSetFormValue(settingsScript, ethField, ethernetStaticGW[i]);
+      strcpy(ethField, "ES0"); ethField[2] = 48+i; printSetFormValue(settingsScript, ethField, ethernetStaticSN[i]);
+    }
     #else
     //hide ethernet setting if not compiled in
     settingsScript.print(F("gId('ethd').style.display='none';"));

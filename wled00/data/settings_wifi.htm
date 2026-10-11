@@ -241,7 +241,15 @@ Static subnet mask:<br>
 			<option value="3">WESP32</option>
 			<option value="1">WT32-ETH01</option>
 			<option value="13">Gledopto</option>
+			<option value="16">W5500 SPI module</option>
 		</select><br><br>
+		<h3>Ethernet IP</h3>
+		Static IP (leave at 0.0.0.0 for automatic):<br>
+		<input name="EI0" type="number" class="s" min="0" max="255" required>.<input name="EI1" type="number" class="s" min="0" max="255" required>.<input name="EI2" type="number" class="s" min="0" max="255" required>.<input name="EI3" type="number" class="s" min="0" max="255" required><br>
+		Static gateway (0.0.0.0 if there is no router):<br>
+		<input name="EG0" type="number" class="s" min="0" max="255" required>.<input name="EG1" type="number" class="s" min="0" max="255" required>.<input name="EG2" type="number" class="s" min="0" max="255" required>.<input name="EG3" type="number" class="s" min="0" max="255" required><br>
+		Static subnet mask:<br>
+		<input name="ES0" type="number" class="s" min="0" max="255" required>.<input name="ES1" type="number" class="s" min="0" max="255" required>.<input name="ES2" type="number" class="s" min="0" max="255" required>.<input name="ES3" type="number" class="s" min="0" max="255" required><br><br>
 	</div>
 	<div class="sec">
 		<h3>DNS & mDNS</h3>

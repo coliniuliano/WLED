@@ -217,7 +217,9 @@ typedef union {
 } ArtPollReply;
 
 // new packet callback
-typedef void (*e131_packet_callback_function) (e131_packet_t* p, IPAddress clientIP, byte protocol, size_t packetLen);
+// clientIP    = address the packet came from
+// receivingIP = local address it arrived on, so replies can go out the same interface
+typedef void (*e131_packet_callback_function) (e131_packet_t* p, IPAddress clientIP, byte protocol, size_t packetLen, IPAddress receivingIP);
 
 class ESPAsyncE131 {
  private:

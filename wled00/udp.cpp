@@ -17,6 +17,23 @@ typedef struct PartialEspNowPacket {
   uint8_t data[247];
 } partial_packet_t;
 
+// Directed broadcast address for an interface. Derived from the interface address
+// rather than the gateway: a static Ethernet segment may legitimately have no
+// router, and a 0.0.0.0 gateway would otherwise produce a bogus broadcast address.
+static IPAddress directedBroadcast(IPAddress ip, IPAddress mask)
+{
+  if (ip == INADDR_NONE || mask == INADDR_NONE || !uint32_t(mask)) return IPAddress(255, 255, 255, 255);
+  return IPAddress((~uint32_t(mask)) | (uint32_t(ip) & uint32_t(mask)));
+}
+
+static void sendNotifyBroadcast(IPAddress broadcastIp, const byte* udpOut)
+{
+  notifierUdp.beginPacket(broadcastIp, udpPort);
+  notifierUdp.write(udpOut, WLEDPACKETSIZE); // TODO: add actual used buffer size
+  notifierUdp.endPacket();
+  DEBUG_PRINT(F("UDP sync sent to ")); DEBUG_PRINTLN(broadcastIp);
+}
+
 void notify(byte callMode, bool followUp)
 {
 #ifndef WLED_DISABLE_ESPNOW
@@ -193,10 +210,22 @@ void notify(byte callMode, bool followUp)
 #endif
   {
     DEBUG_PRINTLN(F("UDP sending packet."));
-    IPAddress broadcastIp = ~uint32_t(WLEDNetwork.subnetMask()) | uint32_t(WLEDNetwork.gatewayIP());
-    notifierUdp.beginPacket(broadcastIp, udpPort);
-    notifierUdp.write(udpOut, WLEDPACKETSIZE); // TODO: add actual used buffer size
-    notifierUdp.endPacket();
+#if defined(ARDUINO_ARCH_ESP32) && defined(WLED_USE_ETHERNET)
+    // Sync traffic goes out every active interface, so peers on either network see it
+    bool sentOnAny = false;
+    if (WLEDNetwork.isEthernetUp()) {
+      sendNotifyBroadcast(directedBroadcast(WLEDNetwork.ethernetIP(), WLEDNetwork.ethernetSubnetMask()), udpOut);
+      sentOnAny = true;
+    }
+    if (WLEDNetwork.isWiFiUp()) {
+      sendNotifyBroadcast(directedBroadcast(WLEDNetwork.wifiIP(), WLEDNetwork.wifiSubnetMask()), udpOut);
+      sentOnAny = true;
+    }
+    if (!sentOnAny)
+#endif
+    {
+      sendNotifyBroadcast(directedBroadcast(WLEDNetwork.localIP(), WLEDNetwork.subnetMask()), udpOut);
+    }
   }
   notificationSentCallMode = callMode;
   notificationSentTime = millis();
@@ -694,11 +723,10 @@ void refreshNodeList()
 /*********************************************************************************************\
    Broadcast system info to other nodes. (to update node lists)
 \*********************************************************************************************/
-void sendSysInfoUDP()
+// Announce ourselves using a specific interface address, so nodes on that network
+// learn an address they can actually reach us on.
+static void sendSysInfoUDPForIP(IPAddress ip)
 {
-  if (!udp2Connected) return;
-
-  IPAddress ip = WLEDNetwork.localIP();
   if (!ip || ip == IPAddress(255,255,255,255)) ip = IPAddress(4,3,2,1);
 
   // TODO: make a nice struct of it and clean up
@@ -732,6 +760,19 @@ void sendSysInfoUDP()
   notifier2Udp.beginPacket(broadcastIP, udpPort2);
   notifier2Udp.write(data, sizeof(data));
   notifier2Udp.endPacket();
+}
+
+void sendSysInfoUDP()
+{
+  if (!udp2Connected) return;
+
+#if defined(ARDUINO_ARCH_ESP32) && defined(WLED_USE_ETHERNET)
+  bool sentOnAny = false;
+  if (WLEDNetwork.isEthernetUp()) { sendSysInfoUDPForIP(WLEDNetwork.ethernetIP()); sentOnAny = true; }
+  if (WLEDNetwork.isWiFiUp())     { sendSysInfoUDPForIP(WLEDNetwork.wifiIP());     sentOnAny = true; }
+  if (sentOnAny) return;
+#endif
+  sendSysInfoUDPForIP(WLEDNetwork.localIP());
 }
 
 

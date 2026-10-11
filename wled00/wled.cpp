@@ -336,6 +336,23 @@ void WLED::loop()
     DEBUG_PRINTF_P(PSTR("State time: %lu\n"),        wifiStateChangedTime);
     DEBUG_PRINTF_P(PSTR("NTP last sync: %lu\n"),     ntpLastSyncTime);
     DEBUG_PRINTF_P(PSTR("Client IP: %u.%u.%u.%u\n"), WLEDNetwork.localIP()[0], WLEDNetwork.localIP()[1], WLEDNetwork.localIP()[2], WLEDNetwork.localIP()[3]);
+    #if defined(ARDUINO_ARCH_ESP32) && defined(WLED_USE_ETHERNET)
+    // With both interfaces live, "Client IP" alone cannot say what is actually up
+    if (WLEDNetwork.isEthernetUp()) {
+      IPAddress eip = WLEDNetwork.ethernetIP();
+      DEBUG_PRINTF_P(PSTR("  ETH:  %u.%u.%u.%u  %uMbps %s%s\n"), eip[0], eip[1], eip[2], eip[3],
+                     (unsigned)ETH.linkSpeed(), ETH.fullDuplex() ? "FD" : "HD",
+                     ethernetLinkLocalAssigned ? " (link-local)" : "");
+    } else {
+      DEBUG_PRINTLN(F("  ETH:  down"));
+    }
+    if (WLEDNetwork.isWiFiUp()) {
+      IPAddress wip = WLEDNetwork.wifiIP();
+      DEBUG_PRINTF_P(PSTR("  WiFi: %u.%u.%u.%u  %ddBm\n"), wip[0], wip[1], wip[2], wip[3], WiFi.RSSI());
+    } else {
+      DEBUG_PRINTF_P(PSTR("  WiFi: down (status=%d, AP=%d)\n"), (int)WiFi.status(), (int)apActive);
+    }
+    #endif
     if (loops > 0) { // avoid division by zero
       DEBUG_PRINTF_P(PSTR("Loops/sec: %u\n"),         loops / 30);
       DEBUG_PRINTF_P(PSTR("Loop time[ms]: %u/%lu\n"), avgLoopMillis/loops,    maxLoopMillis);
@@ -403,6 +420,16 @@ void WLED::setup()
   #if !ARDUINO_USB_CDC_ON_BOOT
   Serial.setTimeout(50);  // this causes troubles on new MCUs that have a "virtual" USB Serial (HWCDC)
   #else
+  // Keep writes non-blocking when no USB host is draining the port. HWCDC raises its
+  // TX timeout from 0 to 100ms the first time it sees a USB connection and never
+  // lowers it again, after which any write() with a full TX ring blocks for up to
+  // 100ms per chunk. On a board powered without USB -- PoE, for instance -- floating
+  // D+/D- can trip that detection with nothing reading the buffer. With WLED_DEBUG the
+  // "Loop delayed" message then re-triggers itself every iteration and the main loop
+  // livelocks: no web server, no sync, and handleSerial() never sees a restart command
+  // either. Pinning the timeout at 0 drops debug output during bursts instead of
+  // stalling the device on it.
+  Serial.setTxTimeoutMs(0);
   #endif
   #if defined(WLED_DEBUG) && defined(ARDUINO_ARCH_ESP32) && ARDUINO_USB_CDC_ON_BOOT
   delay(2500);  // allow CDC USB serial to initialise
@@ -798,6 +825,11 @@ void WLED::initConnection()
     }
   }
 
+  // WLED drives reconnection itself from handleConnection(), so disable the core's
+  // own retry loop: left on, the two fight over the radio and the soft-AP beacon can
+  // be starved while the core retunes for a STA retry.
+  WiFi.setAutoReconnect(false);
+
   lastReconnectAttempt = millis();
 
   if (!WLED_WIFI_CONFIGURED) {
@@ -1005,6 +1037,18 @@ void WLED::handleConnection()
     }
   }
 
+  #if defined(ARDUINO_ARCH_ESP32) && defined(WLED_USE_ETHERNET)
+  // Catch a missed ETH_CONNECTED. initEthernet() runs from deserializeConfig(), well
+  // before WiFi.onEvent() is registered in setup(), so on a cold boot with the cable
+  // already connected the link can come up and the event fire with nothing listening.
+  // esp_netif still brings the netif up, so poll for "link up but no address" and fix
+  // it rather than sitting unreachable until the cable is replugged.
+  if (ETH.linkUp() && ETH.localIP()[0] == 0) {
+    DEBUG_PRINTLN(F("ETH: link up with no address, applying config"));
+    applyEthernetConfig();
+  }
+  #endif
+
   if (!WLEDNetwork.isConnected()) {
     if (interfacesInited) {
       if (scanDone && multiWiFi.size() > 1) {
@@ -1049,7 +1093,8 @@ void WLED::handleConnection()
   } else if (!interfacesInited) { //newly connected
     DEBUG_PRINTLN();
     DEBUG_PRINT(F("Connected! IP address: "));
-    DEBUG_PRINTLN(WLEDNetwork.localIP());
+    DEBUG_PRINT(WLEDNetwork.localIP());
+    DEBUG_PRINTLN(WLEDNetwork.isEthernet() ? F(" via Ethernet") : F(" via WiFi"));
 
     #ifdef ARDUINO_ARCH_ESP32
     esp_wifi_set_storage(WIFI_STORAGE_RAM); // disable further updates of NVM credentials to prevent wear on flash (same as WiFi.persistent(false) but updates immediately, arduino wifi deficiency workaround)

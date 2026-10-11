@@ -135,6 +135,16 @@ bool deserializeConfig(JsonObject doc, bool fromFS) {
 #ifdef WLED_USE_ETHERNET
   JsonObject ethernet = doc[F("eth")];
   CJSON(ethernetType, ethernet["type"]);
+  JsonArray eth_ip = ethernet["ip"];
+  JsonArray eth_gw = ethernet["gw"];
+  JsonArray eth_sn = ethernet["sn"];
+  if (!eth_ip.isNull() && !eth_gw.isNull() && !eth_sn.isNull()) {
+    for (size_t i = 0; i < 4; i++) {
+      CJSON(ethernetStaticIP[i], eth_ip[i]);
+      CJSON(ethernetStaticGW[i], eth_gw[i]);
+      CJSON(ethernetStaticSN[i], eth_sn[i]);
+    }
+  }
   // NOTE: Ethernet configuration takes priority over other use of pins
   initEthernet();
 #endif
@@ -930,22 +940,39 @@ void serializeConfig(JsonObject root) {
   ethernet["type"] = ethernetType;
   if (ethernetType != WLED_ETH_NONE && ethernetType < WLED_NUM_ETH_TYPES) {
     JsonArray pins = ethernet.createNestedArray("pin");
-    for (unsigned p=0; p<WLED_ETH_RSVD_PINS_COUNT; p++) pins.add(esp32_nonconfigurable_ethernet_pins[p].pin);
-    if (ethernetBoards[ethernetType].eth_power>=0)     pins.add(ethernetBoards[ethernetType].eth_power);
-    if (ethernetBoards[ethernetType].eth_mdc>=0)       pins.add(ethernetBoards[ethernetType].eth_mdc);
-    if (ethernetBoards[ethernetType].eth_mdio>=0)      pins.add(ethernetBoards[ethernetType].eth_mdio);
-    switch (ethernetBoards[ethernetType].eth_clk_mode) {
-      case ETH_CLOCK_GPIO0_IN:
-      case ETH_CLOCK_GPIO0_OUT:
-        pins.add(0);
-        break;
-      case ETH_CLOCK_GPIO16_OUT:
-        pins.add(16);
-        break;
-      case ETH_CLOCK_GPIO17_OUT:
-        pins.add(17);
-        break;
+  #ifdef WLED_ETH_HAS_SPI
+    if (isSpiEthernet(ethernetType)) {
+      for (unsigned p=0; p<WLED_ETH_SPI_PINS_COUNT; p++) pins.add(esp32_spi_ethernet_pins[p].pin);
     }
+  #endif
+  #ifdef WLED_ETH_HAS_RMII
+    if (!isSpiEthernet(ethernetType)) {
+      for (unsigned p=0; p<WLED_ETH_RSVD_PINS_COUNT; p++) pins.add(esp32_nonconfigurable_ethernet_pins[p].pin);
+      if (ethernetBoards[ethernetType].eth_power>=0)     pins.add(ethernetBoards[ethernetType].eth_power);
+      if (ethernetBoards[ethernetType].eth_mdc>=0)       pins.add(ethernetBoards[ethernetType].eth_mdc);
+      if (ethernetBoards[ethernetType].eth_mdio>=0)      pins.add(ethernetBoards[ethernetType].eth_mdio);
+      switch (ethernetBoards[ethernetType].eth_clk_mode) {
+        case ETH_CLOCK_GPIO0_IN:
+        case ETH_CLOCK_GPIO0_OUT:
+          pins.add(0);
+          break;
+        case ETH_CLOCK_GPIO16_OUT:
+          pins.add(16);
+          break;
+        case ETH_CLOCK_GPIO17_OUT:
+          pins.add(17);
+          break;
+      }
+    }
+  #endif
+  }
+  JsonArray eth_ip = ethernet.createNestedArray("ip");
+  JsonArray eth_gw = ethernet.createNestedArray("gw");
+  JsonArray eth_sn = ethernet.createNestedArray("sn");
+  for (size_t i = 0; i < 4; i++) {
+    eth_ip.add(ethernetStaticIP[i]);
+    eth_gw.add(ethernetStaticGW[i]);
+    eth_sn.add(ethernetStaticSN[i]);
   }
 #endif
 

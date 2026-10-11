@@ -372,6 +372,12 @@ WLED_GLOBAL uint8_t txPower _INIT(WIFI_POWER_19_5dBm);  // ToDO: change to int8_
   #else
     WLED_GLOBAL int ethernetType _INIT(WLED_ETH_NONE);             // use none for ethernet board type if default not defined
   #endif
+  // Ethernet gets its own address config, independent of the WiFi slots, so it can sit
+  // on a static/no-DHCP segment while WiFi uses DHCP on a different network.
+  WLED_GLOBAL IPAddress ethernetStaticIP _INIT_N(((0, 0, 0, 0)));        // 0.0.0.0 = not configured
+  WLED_GLOBAL IPAddress ethernetStaticGW _INIT_N(((0, 0, 0, 0)));        // may stay 0.0.0.0 for an off-router segment
+  WLED_GLOBAL IPAddress ethernetStaticSN _INIT_N(((255, 255, 255, 0)));
+  WLED_GLOBAL bool ethernetLinkLocalAssigned _INIT(false);               // on APIPA rather than a configured address
 #endif
 
 // LED CONFIG

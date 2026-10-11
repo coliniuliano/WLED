@@ -938,6 +938,19 @@ void serializeInfo(JsonObject root)
     sprintf(s, "%d.%d.%d.%d", localIP[0], localIP[1], localIP[2], localIP[3]);
   }
   root["ip"] = s;
+
+  // With both interfaces up, "ip" only carries whichever one has routing priority.
+  // Report each active interface separately so clients can pick a reachable one.
+  if (WLEDNetwork.isEthernetUp()) {
+    IPAddress ethIP = WLEDNetwork.ethernetIP();
+    sprintf(s, "%d.%d.%d.%d", ethIP[0], ethIP[1], ethIP[2], ethIP[3]);
+    root[F("eth_ip")] = s;
+  }
+  if (WLEDNetwork.isWiFiUp()) {
+    IPAddress wifiIP = WLEDNetwork.wifiIP();
+    sprintf(s, "%d.%d.%d.%d", wifiIP[0], wifiIP[1], wifiIP[2], wifiIP[3]);
+    root[F("wifi_ip")] = s;
+  }
 }
 
 static void setPaletteColors(JsonArray json, CRGBPalette16 palette)

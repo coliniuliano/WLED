@@ -1,10 +1,26 @@
 #include "wled.h"
 #include "fcn_declare.h"
 #include "wled_ethernet.h"
+#if defined(ARDUINO_ARCH_ESP32) && defined(WLED_USE_ETHERNET)
+#include "esp_mac.h"   // esp_read_mac()/ESP_MAC_ETH, for the link-local host part
+#endif
 
 
 #if defined(ARDUINO_ARCH_ESP32) && defined(WLED_USE_ETHERNET)
-#if CONFIG_IDF_TARGET_ESP32 // these options are only valid for classic esp32
+
+#ifdef WLED_ETH_HAS_SPI
+// SPI-attached PHY pins (see wled_ethernet.h). None of the RMII pins below apply.
+const managed_pin_type esp32_spi_ethernet_pins[WLED_ETH_SPI_PINS_COUNT] = {
+    { WLED_ETH_SPI_MISO, false },
+    { WLED_ETH_SPI_MOSI, true  },
+    { WLED_ETH_SPI_SCLK, true  },
+    { WLED_ETH_SPI_CS,   true  },
+    { WLED_ETH_SPI_IRQ,  false },
+    { WLED_ETH_SPI_RST,  true  },
+};
+#endif
+
+#ifdef WLED_ETH_HAS_RMII // RMII options are only valid for classic esp32
 // The following six pins are neither configurable nor
 // can they be re-assigned through IOMUX / GPIO matrix.
 // See https://docs.espressif.com/projects/esp-idf/en/latest/esp32/hw-reference/esp32/get-started-ethernet-kit-v1.1.html#ip101gri-phy-interface
@@ -179,19 +195,95 @@ const ethernet_settings ethernetBoards[] = {
 };
 
 // sanity checks for ethernet config table and WLED_ETH_DEFAULT
-static_assert((sizeof(ethernetBoards)/sizeof(ethernetBoards[0])) == WLED_NUM_ETH_TYPES, "WLED_NUM_ETH_TYPES does not match size of ethernetBoards[] table.");
+static_assert((sizeof(ethernetBoards)/sizeof(ethernetBoards[0])) == (WLED_NUM_ETH_TYPES - WLED_NUM_ETH_SPI_TYPES), "ethernetBoards[] must describe every non-SPI ethernet type.");
 
 #elif CONFIG_IDF_TARGET_ESP32P4
 // ToDO: add P4 specific ethernet options
 #error "Ethernet is not yet supported on your ESP32-P4".
 
-#else
+#elif !defined(WLED_ETH_HAS_SPI)
 #error "Ethernet is not yet supported on your MCU".
 #endif
 
 #ifdef WLED_ETH_DEFAULT
   static_assert(((WLED_ETH_DEFAULT) >= WLED_ETH_NONE) && ((WLED_ETH_DEFAULT) < WLED_NUM_ETH_TYPES), "WLED_ETH_DEFAULT is out of range.");
 #endif
+
+// Assign an RFC 3927 link-local (APIPA) address to the Ethernet interface.
+//
+// This exists because a netif cannot hold a static address while the DHCP client
+// is probing -- starting the client zeroes the address -- so on a segment with no
+// DHCP server the interface would sit at 0.0.0.0 for the full lease timeout. lwIP's
+// own AUTOIP would handle this properly, but CONFIG_LWIP_AUTOIP is not enabled in
+// the prebuilt libraries, so derive the address here instead.
+//
+// The host part comes from the MAC so the address is stable across reboots and
+// unique between boards on the same segment.
+void applyEthernetLinkLocal()
+{
+  // Read from efuse rather than ETH.macAddress(): this runs from initEthernet(),
+  // which is called during config load, before the interface has started and can
+  // report its own MAC. ESP_MAC_ETH is what the driver programs into the W5500
+  // anyway, so the result is identical and available much earlier.
+  uint8_t mac[6] = {0};
+  if (esp_read_mac(mac, ESP_MAC_ETH) != ESP_OK) WLEDNetwork.localMAC(mac);
+  uint8_t third  = mac[4];
+  uint8_t fourth = mac[5];
+  if (third  == 0 || third  == 255) third  = 1; // 169.254.0.x and 169.254.255.x are reserved
+  if (fourth == 0 || fourth == 255) fourth = 1; // avoid network and broadcast addresses
+
+  // No gateway: an RFC 3927 link-local segment has no router by definition, and
+  // inventing one only makes off-subnet traffic ARP for a host that is not there.
+  // Nothing reads it either -- the broadcast address is derived from the interface
+  // address and mask, not the gateway.
+  IPAddress ip(169, 254, third, fourth);
+  ETH.config(ip, INADDR_NONE, IPAddress(255, 255, 0, 0));
+  ethernetLinkLocalAssigned = true;
+
+  DEBUG_PRINT(F("initE: link-local IP: ")); DEBUG_PRINTLN(ip);
+}
+
+// Give the Ethernet interface its address. Called from the ETH_CONNECTED event and,
+// as a safety net, from handleConnection() -- initEthernet() runs from
+// deserializeConfig(), well before WiFi.onEvent() is registered in setup(), so on a
+// cold boot with the cable already connected the link can come up and the event fire
+// with no handler attached. esp_netif still brings the netif up, so everything looks
+// healthy while the interface has no address at all.
+//
+// Idempotent: safe to call repeatedly.
+void applyEthernetConfig()
+{
+  // A dedicated Ethernet static IP takes priority over everything else
+  // NB: compare through uint32_t, never against a literal 0. IPAddress on
+  // arduino-esp32 3.x dropped operator==(uint32_t); a zero constant then binds to
+  // operator==(const uint8_t*), which memcmp()s from address 0 and panics. It
+  // compiles silently -- this crashed every boot before it was caught.
+  if (uint32_t(ethernetStaticIP) != 0U) {
+    DEBUG_PRINTLN(F("initE: using Ethernet static IP"));
+    ETH.config(ethernetStaticIP, ethernetStaticGW, ethernetStaticSN, dnsAddress);
+    ethernetLinkLocalAssigned = false;
+  }
+  // Backwards compatibility: WiFi slot 0's static IP used to be shared with Ethernet.
+  // See https://github.com/wled/WLED/issues/5247
+  else if (multiWiFi.size() && multiWiFi[0].staticIP != IPAddress() && multiWiFi[0].staticGW != IPAddress()) {
+    DEBUG_PRINTLN(F("initE: using WiFi slot 0 static IP"));
+    ETH.config(multiWiFi[0].staticIP, multiWiFi[0].staticGW, multiWiFi[0].staticSN, dnsAddress);
+    ethernetLinkLocalAssigned = false;
+  }
+#ifdef WLED_ETH_LINK_LOCAL_FALLBACK
+  // No static address and no DHCP server expected on this segment
+  else {
+    applyEthernetLinkLocal();
+  }
+#else
+  else {
+    DEBUG_PRINTLN(F("initE: using DHCP"));
+    ETH.config(INADDR_NONE, INADDR_NONE, INADDR_NONE);
+    ethernetLinkLocalAssigned = false;
+  }
+#endif
+  DEBUG_PRINT(F("initE: ETH.localIP(): ")); DEBUG_PRINTLN(ETH.localIP());
+}
 
 bool initEthernet()
 {
@@ -210,6 +302,32 @@ bool initEthernet()
   }
 
   DEBUG_PRINTF_P(PSTR("initE: Attempting ETH config: %d\n"), ethernetType);
+
+#ifdef WLED_ETH_HAS_SPI
+  if (isSpiEthernet(ethernetType)) {
+    if (!PinManager::allocateMultiplePins(esp32_spi_ethernet_pins, WLED_ETH_SPI_PINS_COUNT, PinOwner::Ethernet)) {
+      DEBUG_PRINTLN(F("initE: Failed to allocate SPI ethernet pins"));
+      return false;
+    }
+    if (!ETH.begin((eth_phy_type_t)ETH_PHY_W5500, (int32_t)WLED_ETH_SPI_ADDR,
+                   WLED_ETH_SPI_CS, WLED_ETH_SPI_IRQ, WLED_ETH_SPI_RST,
+                   (spi_host_device_t)WLED_ETH_SPI_HOST,
+                   WLED_ETH_SPI_SCLK, WLED_ETH_SPI_MISO, WLED_ETH_SPI_MOSI,
+                   WLED_ETH_SPI_FREQ_MHZ)) {
+      DEBUG_PRINTLN(F("initE: ETH.begin() failed for SPI PHY"));
+      for (managed_pin_type mpt : esp32_spi_ethernet_pins) {
+        PinManager::deallocatePin(mpt.pin, PinOwner::Ethernet);
+      }
+      return false;
+    }
+    applyEthernetConfig();
+    successfullyConfiguredEthernet = true;
+    DEBUG_PRINTLN(F("initE: *** SPI Ethernet successfully configured! ***"));
+    return true;
+  }
+#endif
+
+#ifdef WLED_ETH_HAS_RMII
 
   // Ethernet initialization should only succeed once -- else reboot required
   ethernet_settings es = ethernetBoards[ethernetType];
@@ -294,16 +412,15 @@ bool initEthernet()
     return false;
   }
 
-  // https://github.com/wled/WLED/issues/5247
-  if (multiWiFi.size() && multiWiFi[0].staticIP != IPAddress() && multiWiFi[0].staticGW != IPAddress()) {
-    ETH.config(multiWiFi[0].staticIP, multiWiFi[0].staticGW, multiWiFi[0].staticSN, dnsAddress);
-  } else {
-    ETH.config(INADDR_NONE, INADDR_NONE, INADDR_NONE);
-  }
+  applyEthernetConfig();
 
   successfullyConfiguredEthernet = true;
   DEBUG_PRINTLN(F("initE: *** Ethernet successfully configured! ***"));
   return true;
+#endif // WLED_ETH_HAS_RMII
+
+  DEBUG_PRINTLN(F("initE: no driver for this ethernet type"));
+  return false;
 }
 #endif
 
@@ -456,7 +573,7 @@ void WiFiEvent(WiFiEvent_t event)
       DEBUG_PRINTF_P(PSTR("WiFi-E: AP Client Connected (%d) @ %lus.\n"), (int)apClients, millis()/1000);
       break;
     case ARDUINO_EVENT_WIFI_STA_GOT_IP:
-      DEBUG_PRINT(F("WiFi-E: IP address: ")); DEBUG_PRINTLN(WLEDNetwork.localIP());
+      DEBUG_PRINT(F("WiFi-E: WiFi IP address: ")); DEBUG_PRINTLN(WLEDNetwork.wifiIP());
       break;
     case ARDUINO_EVENT_WIFI_STA_CONNECTED:
       // followed by IDLE and SCAN_DONE
@@ -468,8 +585,11 @@ void WiFiEvent(WiFiEvent_t event)
         DEBUG_PRINTF_P(PSTR("WiFi-E: Disconnected! @ %lus\n"), millis()/1000);
         if (interfacesInited && multiWiFi.size() > 1 && WiFi.scanComplete() >= 0) {
           findWiFi(true); // reinit WiFi scan
-          forceReconnect = true;
         }
+        // Reconnect on the next loop rather than waiting out the timer in
+        // handleConnection(). Gated on wasConnected above, so a failing
+        // authentication cannot turn this into a hot loop.
+        forceReconnect = true;
         interfacesInited = false;
       }
       break;
@@ -507,9 +627,9 @@ void WiFiEvent(WiFiEvent_t event)
     case ARDUINO_EVENT_ETH_CONNECTED:
       {
       DEBUG_PRINTLN(F("ETH-E: Connected"));
-      if (!apActive) {
-        WiFi.disconnect(true); // disable WiFi entirely
-      }
+      // WiFi is deliberately left running: both interfaces serve traffic
+      // simultaneously on this build. See WLEDNetwork's per-interface accessors.
+      applyEthernetConfig(); // idempotent; also covers a link that bounced
       char hostname[64] = {'\0'}; // any "hostname" within a Fully Qualified Domain Name (FQDN) must not exceed 63 characters
       getWLEDhostname(hostname, sizeof(hostname), true); // create DNS name based on mDNS name if set, or fall back to standard WLED server name
       ETH.setHostname(hostname);
@@ -518,6 +638,7 @@ void WiFiEvent(WiFiEvent_t event)
       }
     case ARDUINO_EVENT_ETH_DISCONNECTED:
       DEBUG_PRINTLN(F("ETH-E: Disconnected"));
+      ethernetLinkLocalAssigned = false; // re-applied on the next ETH_CONNECTED
       // This doesn't really affect ethernet per se,
       // as it's only configured once.  Rather, it
       // may be necessary to reconnect the WiFi when

@@ -1,3 +1,32 @@
+> ## Fork: W5500 SPI Ethernet for ESP32-S3
+>
+> This branch adds W5500 SPI Ethernet to WLED on the ESP32-S3, for driving LEDs over
+> sACN/E1.31/Art-Net on a lighting segment with no DHCP server, while WiFi stays available
+> for the web UI.
+>
+> Upstream only supports RMII Ethernet, which needs the EMAC peripheral the S3 does not
+> have. A W5500 over SPI needs no EMAC, and arduino-esp32 3.x exposes SPI PHYs through the
+> stock `ETH` class, so this needs **no external library**.
+>
+> - Build environment: **`esp32s3_w5500`** (ESP32-S3 SuperMini + W5500)
+> - Ethernet gets its own IP config, separate from the WiFi slots
+> - Self-assigns an RFC 3927 link-local address when DHCP goes unanswered, and still takes
+>   a lease whenever one is offered
+> - WiFi and Ethernet run simultaneously; Art-Net poll replies answer on the interface the
+>   request arrived on
+> - Pin assignment is overridable via `WLED_ETH_SPI_*` build flags (see
+>   `wled00/wled_ethernet.h`)
+>
+> Verified on hardware: W5500 brings up at 100Mbps full duplex and the web UI is reachable
+> over Ethernet. **Not yet verified:** Art-Net over Ethernet, simultaneous WiFi + Ethernet.
+>
+> **[MIGRATION-NOTES.md](MIGRATION-NOTES.md)** covers the design decisions and the rebase
+> from ESP-IDF 4.4. Supersedes `w5500-ethernet-attempt1`, which is frozen. The
+> `w5500-ethernet-autoip` branch is a further experiment using a custom-built framework
+> with lwIP's AUTOIP compiled in.
+>
+> Everything below is upstream WLED's readme, unmodified.
+
 <p align="center">
   <img src="/images/wled_logo_akemi.png">
   <a href="https://github.com/wled-dev/WLED/releases"><img src="https://img.shields.io/github/release/wled-dev/WLED.svg?style=flat-square"></a>

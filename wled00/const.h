@@ -419,7 +419,8 @@ static_assert(WLED_MAX_BUSSES <= 32, "WLED_MAX_BUSSES exceeds hard limit");
 #define BTN_TYPE_TOUCH_SWITCH     9
 
 //Ethernet board types
-#define WLED_NUM_ETH_TYPES        16
+#define WLED_NUM_ETH_TYPES        17
+#define WLED_NUM_ETH_SPI_TYPES     1   // SPI PHYs live outside ethernetBoards[]; see wled_ethernet.h
 
 
 #define WLED_ETH_NONE              0
@@ -438,6 +439,9 @@ static_assert(WLED_MAX_BUSSES <= 32, "WLED_MAX_BUSSES exceeds hard limit");
 #define WLED_ETH_GLEDOPTO         13
 #define WLED_ETH_QUINLED_V4_UNOQUAD  14
 #define WLED_ETH_QUINLED_V4_OCTA     15
+// SPI-attached PHYs. These are not RMII and are not described by ethernetBoards[];
+// they must be numbered last so the ethernetBoards[] static_assert stays meaningful.
+#define WLED_ETH_W5500            16
 
 
 //Hue error codes

@@ -85,15 +85,17 @@ void wsEvent(AsyncWebSocket * server, AsyncWebSocketClient * client, AwsEventTyp
         //DEBUG_PRINTF_P(PSTR("WS binary message: len %u, byte0: %u\n"), len, data[0]);
         constexpr int offset = 1; // offset to skip protocol byte
         if (!data || len < offset+1) return; // catch invalid / single-byte payload
+        // WebSockets do not expose which interface the frame arrived on
+        IPAddress receivingIP = WLEDNetwork.localIP();
         switch (data[0]) {
           case BINARY_PROTOCOL_E131:
-            handleE131Packet((e131_packet_t*)&data[offset], client->remoteIP(), P_E131, len - offset);
+            handleE131Packet((e131_packet_t*)&data[offset], client->remoteIP(), P_E131, len - offset, receivingIP);
             break;
           case BINARY_PROTOCOL_ARTNET:
-            handleE131Packet((e131_packet_t*)&data[offset], client->remoteIP(), P_ARTNET, len - offset);
+            handleE131Packet((e131_packet_t*)&data[offset], client->remoteIP(), P_ARTNET, len - offset, receivingIP);
             break;
           case BINARY_PROTOCOL_DDP:
-            handleE131Packet((e131_packet_t*)&data[offset], client->remoteIP(), P_DDP, len - offset);
+            handleE131Packet((e131_packet_t*)&data[offset], client->remoteIP(), P_DDP, len - offset, receivingIP);
         }
       }
     } else {

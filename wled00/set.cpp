@@ -167,7 +167,32 @@ void handleSettingsSet(AsyncWebServerRequest *request, byte subPage)
     #endif
 
     #if defined(ARDUINO_ARCH_ESP32) && defined(WLED_USE_ETHERNET)
+    int oldEthernetType = ethernetType;
+    IPAddress oldEthIP = ethernetStaticIP;
+    IPAddress oldEthGW = ethernetStaticGW;
+    IPAddress oldEthSN = ethernetStaticSN;
+
     ethernetType = request->arg(F("ETH")).toInt();
+    for (size_t i = 0; i < 4; i++) {
+      char ei[4] = "EI0"; ei[2] = 48+i;
+      char eg[4] = "EG0"; eg[2] = 48+i;
+      char es[4] = "ES0"; es[2] = 48+i;
+      ethernetStaticIP[i] = request->arg(ei).toInt();
+      ethernetStaticGW[i] = request->arg(eg).toInt();
+      ethernetStaticSN[i] = request->arg(es).toInt();
+    }
+
+    if (oldEthernetType != ethernetType) {
+      // The PHY is only brought up once, so changing its type needs a restart
+      DEBUG_PRINTLN(F("ETH: type changed, reboot required"));
+      doReboot = true;
+    } else if (WLEDNetwork.isEthernetUp() &&
+               (oldEthIP != ethernetStaticIP || oldEthGW != ethernetStaticGW || oldEthSN != ethernetStaticSN)) {
+      // Only the addressing changed, so re-apply it in place rather than rebooting
+      DEBUG_PRINTLN(F("ETH: reconfiguring address"));
+      applyEthernetConfig();
+    }
+
     initEthernet();
     #endif
   }

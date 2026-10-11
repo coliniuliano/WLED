@@ -6,8 +6,8 @@
 
 // forward declarations
 static void handleDDPPacket(e131_packet_t* p, size_t packetLen);
-static void handleArtnetPollReply(IPAddress ipAddress);
-static void prepareArtnetPollReply(ArtPollReply *reply);
+static void handleArtnetPollReply(IPAddress ipAddress, IPAddress replyFromIP);
+static void prepareArtnetPollReply(ArtPollReply *reply, IPAddress replyFromIP);
 static void sendArtnetPollReply(ArtPollReply *reply, IPAddress ipAddress, uint16_t portAddress);
 
 // Runtime state private to this file - previously WLED_GLOBAL, a leftover from
@@ -98,7 +98,7 @@ static void handleDDPPacket(e131_packet_t* p, size_t packetLen) {
 }
 
 //E1.31 and Art-Net protocol support
-void handleE131Packet(e131_packet_t* p, IPAddress clientIP, byte protocol, size_t packetLen){
+void handleE131Packet(e131_packet_t* p, IPAddress clientIP, byte protocol, size_t packetLen, IPAddress receivingIP){
 
   int uni = 0, dmxChannels = 0;
   uint8_t* e131_data = nullptr;
@@ -108,7 +108,7 @@ void handleE131Packet(e131_packet_t* p, IPAddress clientIP, byte protocol, size_
   {
     if (packetLen < 10) return; // need at least art_opcode (offset 8, 2 bytes)
     if (p->art_opcode == ARTNET_OPCODE_OPPOLL) {
-      handleArtnetPollReply(clientIP);
+      handleArtnetPollReply(clientIP, receivingIP);
       return;
     }
     if (packetLen < 18) return; // need art_length (offset 16, 2 bytes) for DMX data
@@ -383,9 +383,9 @@ void handleDMXData(uint16_t uni, uint16_t dmxChannels, uint8_t* e131_data, uint8
   e131NewData = true;
 }
 
-static void handleArtnetPollReply(IPAddress ipAddress) {
+static void handleArtnetPollReply(IPAddress ipAddress, IPAddress replyFromIP) {
   ArtPollReply artnetPollReply;
-  prepareArtnetPollReply(&artnetPollReply);
+  prepareArtnetPollReply(&artnetPollReply, replyFromIP);
 
   unsigned startUniverse = e131Universe;
   unsigned endUniverse = e131Universe;
@@ -449,7 +449,7 @@ static void handleArtnetPollReply(IPAddress ipAddress) {
   #endif
 }
 
-static void prepareArtnetPollReply(ArtPollReply *reply) {
+static void prepareArtnetPollReply(ArtPollReply *reply, IPAddress replyFromIP) {
   // Art-Net
   reply->reply_id[0] = 0x41;
   reply->reply_id[1] = 0x72;
@@ -462,7 +462,10 @@ static void prepareArtnetPollReply(ArtPollReply *reply) {
 
   reply->reply_opcode = ARTNET_OPCODE_OPPOLLREPLY;
 
-  IPAddress localIP = WLEDNetwork.localIP();
+  // Reply with the address the poll arrived on, not whichever interface has
+  // routing priority, so a controller on either network gets a usable address.
+  IPAddress localIP = replyFromIP;
+  if (localIP == INADDR_NONE) localIP = WLEDNetwork.localIP();
   for (unsigned i = 0; i < 4; i++) {
     reply->reply_ip[i] = localIP[i];
   }

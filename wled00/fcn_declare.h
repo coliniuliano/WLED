@@ -109,7 +109,7 @@ void initDMXInput();
 void handleDMXInput();
 
 //e131.cpp
-void handleE131Packet(e131_packet_t* p, IPAddress clientIP, byte protocol, size_t packetLen);
+void handleE131Packet(e131_packet_t* p, IPAddress clientIP, byte protocol, size_t packetLen, IPAddress receivingIP);
 void handleDMXData(uint16_t uni, uint16_t dmxChannels, uint8_t* e131_data, uint8_t mde, uint8_t previousUniverses);
 // void handleArtnetPollReply(IPAddress ipAddress);                                          // local function, only used in e131.cpp
 // void prepareArtnetPollReply(ArtPollReply* reply);                                         // local function, only used in e131.cpp
@@ -316,6 +316,10 @@ void espNowReceiveCB(uint8_t* address, uint8_t* data, uint8_t len, signed int rs
 
 //network.cpp
 bool initEthernet(); // result is informational
+#if defined(ARDUINO_ARCH_ESP32) && defined(WLED_USE_ETHERNET)
+void applyEthernetLinkLocal(); // RFC 3927 APIPA address, used in place of DHCP
+void applyEthernetConfig();    // static IP, legacy WiFi-slot-0 IP, link-local or DHCP; idempotent
+#endif
 int  getSignalQuality(int rssi);
 void fillMAC2Str(char *str, const uint8_t *mac);
 void fillStr2MAC(uint8_t *mac, const char *str);
