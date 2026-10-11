@@ -1,0 +1,31 @@
+# Build environment for rebuilding the arduino-esp32 prebuilt libraries with
+# CONFIG_LWIP_AUTOIP enabled. See README.md in this directory.
+#
+# Deliberately plain Ubuntu rather than espressif/esp32-arduino-lib-builder:
+# that image is amd64-only, which would mean qemu emulation on Apple Silicon.
+# ESP-IDF ships linux-arm64 toolchains, so a native arm64 container builds at
+# full speed.
+FROM docker.io/library/ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV LC_ALL=C.UTF-8
+ENV LANG=C.UTF-8
+
+# Dependencies from the lib-builder README, plus what IDF's install.sh needs.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      git wget curl ca-certificates \
+      libssl-dev libncurses-dev \
+      flex bison gperf \
+      python3 python3-pip python3-venv python3-setuptools \
+      cmake ninja-build ccache jq \
+      libusb-1.0-0 dfu-util \
+      file unzip xz-utils patch \
+    && rm -rf /var/lib/apt/lists/*
+
+# Non-root user: lib-builder and IDF's tooling dislike running as root.
+RUN useradd -m -s /bin/bash builder
+WORKDIR /work
+RUN chown builder:builder /work
+USER builder
+
+CMD ["/bin/bash"]

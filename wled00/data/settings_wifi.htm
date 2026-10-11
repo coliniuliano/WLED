@@ -244,6 +244,8 @@ Static subnet mask:<br>
 			<option value="16">W5500 SPI module</option>
 		</select><br><br>
 		<h3>Ethernet IP</h3>
+		<i>With no static IP below, the interface uses DHCP and self-assigns a
+		169.254.x.x link-local address (RFC 3927) if no server answers.</i><br><br>
 		Static IP (leave at 0.0.0.0 for automatic):<br>
 		<input name="EI0" type="number" class="s" min="0" max="255" required>.<input name="EI1" type="number" class="s" min="0" max="255" required>.<input name="EI2" type="number" class="s" min="0" max="255" required>.<input name="EI3" type="number" class="s" min="0" max="255" required><br>
 		Static gateway (0.0.0.0 if there is no router):<br>

@@ -1,139 +1,90 @@
-> ## Fork: W5500 SPI Ethernet for ESP32-S3
->
-> This branch adds W5500 SPI Ethernet to WLED on the ESP32-S3, for driving LEDs over
-> sACN/E1.31/Art-Net on a lighting segment with no DHCP server, while WiFi stays available
-> for the web UI.
->
-> Upstream only supports RMII Ethernet, which needs the EMAC peripheral the S3 does not
-> have. A W5500 over SPI needs no EMAC, and arduino-esp32 3.x exposes SPI PHYs through the
-> stock `ETH` class, so this needs **no external library**.
->
-> - Build environment: **`esp32s3_w5500`** (ESP32-S3 SuperMini + W5500)
-> - Ethernet gets its own IP config, separate from the WiFi slots
-> - Self-assigns an RFC 3927 link-local address when DHCP goes unanswered, and still takes
->   a lease whenever one is offered
-> - WiFi and Ethernet run simultaneously; Art-Net poll replies answer on the interface the
->   request arrived on
-> - Pin assignment is overridable via `WLED_ETH_SPI_*` build flags (see
->   `wled00/wled_ethernet.h`)
->
-> Verified on hardware: W5500 brings up at 100Mbps full duplex and the web UI is reachable
-> over Ethernet. **Not yet verified:** Art-Net over Ethernet, simultaneous WiFi + Ethernet.
->
-> **[MIGRATION-NOTES.md](MIGRATION-NOTES.md)** covers the design decisions and the rebase
-> from ESP-IDF 4.4. Supersedes `w5500-ethernet-attempt1`, which is frozen. The
-> `w5500-ethernet-autoip` branch is a further experiment using a custom-built framework
-> with lwIP's AUTOIP compiled in.
->
-> Everything below is upstream WLED's readme, unmodified.
+# WLED fork — W5500 Ethernet for DMX lighting
 
-<p align="center">
-  <img src="/images/wled_logo_akemi.png">
-  <a href="https://github.com/wled-dev/WLED/releases"><img src="https://img.shields.io/github/release/wled-dev/WLED.svg?style=flat-square"></a>
-  <a href="https://raw.githubusercontent.com/wled-dev/WLED/main/LICENSE"><img src="https://img.shields.io/github/license/wled-dev/wled?color=blue&style=flat-square"></a>
-  <a href="https://wled.discourse.group"><img src="https://img.shields.io/discourse/topics?colorB=blue&label=forum&server=https%3A%2F%2Fwled.discourse.group%2F&style=flat-square"></a>
-  <a href="https://discord.gg/QAh7wJHrRM"><img src="https://img.shields.io/discord/473448917040758787.svg?colorB=blue&label=discord&style=flat-square"></a>
-  <a href="https://kno.wled.ge"><img src="https://img.shields.io/badge/quick_start-wiki-blue.svg?style=flat-square"></a>
-  <a href="https://github.com/Aircoookie/WLED-App"><img src="https://img.shields.io/badge/app-wled-blue.svg?style=flat-square"></a>
-  <a href="https://gitpod.io/#https://github.com/wled-dev/WLED"><img src="https://img.shields.io/badge/Gitpod-ready--to--code-blue?style=flat-square&logo=gitpod"></a>
-</p>
+ESP32-S3 + W5500 SPI Ethernet, for driving LEDs over sACN/E1.31/Art-Net on a lighting
+segment that has no DHCP server, while WiFi stays available for the web UI.
 
-# Welcome to WLED! ✨
+Upstream WLED's readme is at **[readme-upstream.md](readme-upstream.md)**. Everything below
+is about this fork.
 
-A fast and feature-rich firmware for ESP32 microcontrollers to control addressable LEDs — from simple strips to large 2D matrices and HUB75 panels.
+## Branches
 
-Originally created by [Aircoookie](https://github.com/Aircoookie), now maintained by a community of contributors.
+| branch | state |
+|---|---|
+| `w5500-ethernet-attempt1` | **frozen.** Built against ESP-IDF 4.4 and two personal library forks. Kept as a reference; tagged `attempt1-base` / `attempt1-working` |
+| `w5500-ethernet-espidf5` | **working firmware.** Rebased onto current upstream, native IDF5 SPI Ethernet driver, no library forks |
+| `w5500-ethernet-autoip` | ← *you are here.* Adds lwIP-level link-local addressing, which needs a custom-built framework |
 
-## 🤝 Contributing
+## Build environments
 
-Want to help improve WLED? Awesome! Please skim [CONTRIBUTING.md](CONTRIBUTING.md) first - it covers how we like PRs and issues to look, including our take on AI-assisted contributions.
-If you're an AI coding agent, [AGENTS.md](AGENTS.md) is for you - please read it before modifying any files. 😊
+| env | framework | use when |
+|---|---|---|
+| `esp32s3_w5500` | stock (tasmota, as upstream WLED ships) | **default.** Hardware-verified |
+| `esp32s3_w5500_autoip` | custom-built with `CONFIG_LWIP_AUTOIP=y` | experimental — see Status |
 
-## ⚙️ Features
+```bash
+pio run -e esp32s3_w5500 --target upload
+```
 
-### Effects & Visuals
-- [**200+ built-in effects**](https://kno.wled.ge/features/effects/) including classic animations, audio-reactive, and 2D/matrix effects
-- [50+ color palettes](https://kno.wled.ge/features/palettes/) plus a built-in **custom palette editor** (PixelForge)
-- [**2D LED matrix support**](https://kno.wled.ge/advanced/mapping/) with dedicated 2D effects and flexible panel mapping
-- [**HUB75 RGB matrix panel support**](https://kno.wled.ge/advanced/HUB75/) (ESP32)
-- [**AudioReactive**](https://kno.wled.ge/advanced/audio-reactive/) effects — included by default, responding to sound via microphone, line-in, or network audio source
-- Effect blending for smooth transitions between animations
-- Antialiased drawing functions for smooth graphics
+The `_autoip` env needs its framework built first — see
+[tools/autoip-build/README.md](tools/autoip-build/README.md). It will not build without it.
 
-### Segments & Control
-- [**Segments**](https://kno.wled.ge/features/segments/) — apply different effects, colors and palettes to independent parts of your LED setup simultaneously
-- Up to **250 presets** to save and recall colors, effects and segment configurations — supports [playlists](https://kno.wled.ge/features/presets/) for automated cycling
-- Nightlight function with configurable dimming curve
-- Configurable **Auto Brightness Limiter** (per output) for safe operation
+## What this fork adds
 
-### Hardware Support
-- **ESP32** (all variants: original, S2, S3, C3)
-- [**Up to 17 LED outputs**](https://kno.wled.ge/features/multi-strip/) on ESP32 using parallel I2S + RMT
-- [Addressable LED support](https://kno.wled.ge/basics/compatible-led-strips/): WS2812B, WS2811, WS2815, SK6812, WS2805, TM1914, APA102, WS2801, LPD8806, and many more
-- RGBW, [RGB+CCT](https://kno.wled.ge/features/cct/) and white-only strips
-- PWM outputs for analog LEDs and dimmers
-- [**Ethernet** support](https://kno.wled.ge/features/ethernet-lan/) for a wide range of boards (QuinLED, LILYGO, Olimex, and more)
-- Filesystem-based config for easy backup and restore of presets and settings
-- Full OTA firmware updates (HTTP + ArduinoOTA), password-protectable
+- **W5500 SPI Ethernet on ESP32-S3.** Upstream only supports RMII, which the S3 has no
+  hardware for. Uses the native SPI PHY driver in arduino-esp32 3.x — no external library.
+- **A dedicated Ethernet IP config**, separate from the WiFi slots, so Ethernet can sit on
+  a static or DHCP-less segment while WiFi uses DHCP elsewhere.
+- **An address when there is no DHCP server.** Previously the interface sat at `0.0.0.0`
+  forever. It now ends up with an RFC 3927 `169.254.x.y` address, and still takes a DHCP
+  lease whenever one is offered.
+- **Simultaneous WiFi and Ethernet** — per-interface accessors, and UDP sync, node
+  discovery and Art-Net poll replies answer on the interface a request arrived on.
 
-### Connectivity & Integrations
-- **WLED app** for [Android](https://play.google.com/store/apps/details?id=ca.cgagnier.wlednativeandroid) and [iOS](https://apps.apple.com/gb/app/wled-native/id6446207239)
-- [JSON](https://kno.wled.ge/interfaces/json-api/) and [HTTP request](https://kno.wled.ge/interfaces/http-api/) APIs
-- **Multi-WiFi** — connect to up to 3 networks with automatic AP fallback
-- **ESP-NOW** wireless sync between devices (no WiFi router required)
-- [**MQTT**](https://kno.wled.ge/interfaces/mqtt/) with Home Assistant discovery
-- [**E1.31, Art-Net**](https://kno.wled.ge/interfaces/e1.31-dmx/), [DDP](https://kno.wled.ge/interfaces/ddp/) and [TPM2.net](https://kno.wled.ge/interfaces/udp-realtime/) for DMX/professional lighting control
-- [UDP realtime sync](https://kno.wled.ge/interfaces/udp-notifier/) across multiple WLED devices
-- Alexa voice control (on/off, brightness, color)
-- [Philips Hue sync](https://kno.wled.ge/interfaces/philips-hue/)
-- [diyHue](https://github.com/diyhue/diyHue) and [Hyperion](https://github.com/hyperion-project/hyperion.ng) integration
-- [Adalight / TPM2](https://kno.wled.ge/interfaces/serial/) (PC ambilight via serial)
-- [Infrared remote control](https://kno.wled.ge/interfaces/infrared/) (24-key RGB, receiver required)
-- Timers and schedules (NTP time sync, full timezone and DST support)
+Pin assignment is compile-time and overridable via `WLED_ETH_SPI_*` build flags; defaults
+match the ESP32-S3 SuperMini wiring. See `wled00/wled_ethernet.h`.
 
-### Developer-Friendly
-- **Usermod system** — extend WLED with community or custom modules without modifying core code
-- Large and active [usermod library](https://kno.wled.ge/advanced/community-usermods/) including AudioReactive, temperature sensors, rotary encoders, displays, and much more
-- Well-documented [JSON API](https://kno.wled.ge/interfaces/json-api/)
-- Licensed under the **EUPL v1.2**
+## Status
 
-## 📲 Quick start guide and documentation
+**`esp32s3_w5500` — works on hardware.**
 
-See the [documentation at kno.wled.ge](https://kno.wled.ge)!
+```
+initE: *** SPI Ethernet successfully configured! ***
+ETH-E: Connected
+Connected! IP address: 169.254.70.125 via Ethernet
+  ETH:  169.254.70.125  100Mbps FD (link-local)
+```
 
-[Tutorials and getting-started guides](https://kno.wled.ge/basics/tutorials/) to help you get your project running quickly.
+**`esp32s3_w5500_autoip` — boots, but has an open regression.** Ethernet initialises
+correctly and the lwIP AUTOIP path is active (`initE: starting DHCP` rather than WLED
+self-assigning). However the RMT LED driver logs `rmt_tx_wait_all_done: flush timeout`
+once per frame, meaning LED frames are submitted and never complete. The stock framework
+on the same board shows zero of these, so it is introduced by the custom framework.
+Under investigation — the suspects are the IDF/Arduino version jump (5.5.5 / 3.3.12 vs
+5.5.4 / 3.3.8) versus the sdkconfig this fork sets.
 
-## 🖼️ User interface
+**Not yet verified on hardware:** link-local assignment by lwIP, DHCP handover, Art-Net
+over Ethernet, simultaneous WiFi + Ethernet.
 
-<img src="/images/macbook-pro-space-gray-on-the-wooden-table.jpg" width="50%"><img src="/images/walking-with-iphone-x.jpg" width="50%">
+## Notes for this rig
 
-## 💾 Compatible hardware
+**Use a static Ethernet IP if startup time matters.** It is applied directly on link-up —
+no DHCP wait, no RFC 3927 conflict probing, same address every power cycle. Link-local
+takes ~5–9 s, most of which is mandatory ARP probing. AUTOIP is for when you do not want
+to configure anything; a fixed installation does not need it.
 
-See the [compatible hardware list](https://kno.wled.ge/basics/compatible-hardware) on the wiki.
+**`esp32s3_w5500_autoip` uses a 1.9MB app partition** (vs 1.5MB), because its framework
+produces a ~495kB larger binary. OTA still works — the layout keeps two app slots — but
+the filesystem drops from 1MB to 256kB, and switching between the two environments
+reformats it.
 
-## ✌️ Other
+**`WLED_DEBUG` is on** in both environments. Turn it off for a deployment: it costs flash,
+and on a PoE-only board the USB CDC TX path can stall the main loop (see
+`Serial.setTxTimeoutMs(0)` in `wled00/wled.cpp` for the fix that makes it survivable).
 
-Licensed under the [EUPL v1.2](https://raw.githubusercontent.com/wled-dev/WLED/main/LICENSE).  
-Credits to all [contributors](https://kno.wled.ge/about/contributors/)!  
-CORS proxy by [Corsfix](https://corsfix.com/).
+## Documentation
 
-![CodeRabbit Pull Request Reviews](https://img.shields.io/coderabbit/prs/github/wled/WLED?utm_source=oss&utm_medium=github&utm_campaign=wled%2FWLED&labelColor=171717&color=FF570A&link=https%3A%2F%2Fcoderabbit.ai&label=PR+Reviews+supported+by+CodeRabbit)
-
-Join the Discord server to discuss everything about WLED!
-
-<a href="https://discord.gg/QAh7wJHrRM"><img src="https://discordapp.com/api/guilds/473448917040758787/widget.png?style=banner2" width="25%"></a>
-
-Check out the WLED [Discourse forum](https://wled.discourse.group)!
-
-If you'd like to reach the original creator privately: [dev.aircoookie@gmail.com](mailto:dev.aircoookie@gmail.com).
-
-If WLED brightens up your day, you can [send a gift to Aircoookie via PayPal](https://paypal.me/aircoookie).
-
----
-
-*Disclaimer:*
-
-If you are prone to photosensitive epilepsy, we recommend you do **not** use this software.  
-If you still want to try, avoid strobe, lightning or noise modes and high effect speed settings.
-
-As per the EUPL license, no liability is assumed for any damage to you or any other person or equipment.
+| file | what |
+|---|---|
+| [AUTOIP.md](AUTOIP.md) | link-local addressing: design decisions, what lwIP does vs what WLED does, timings |
+| [MIGRATION-NOTES.md](MIGRATION-NOTES.md) | the ESP-IDF 4→5 rebase off `attempt1`: what changed, what was dropped and why |
+| [tools/autoip-build/](tools/autoip-build/) | building the custom framework, and tearing it down afterwards |

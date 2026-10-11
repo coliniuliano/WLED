@@ -993,6 +993,13 @@ void WLED::initInterfaces()
 
 void WLED::handleConnection()
 {
+  #if defined(ARDUINO_ARCH_ESP32) && defined(WLED_USE_ETHERNET)
+  // Ahead of every guard below: Ethernet addressing is independent of WiFi state, and
+  // the early returns for "scan in progress" and "forced reconnect" would otherwise
+  // stall the DHCP->link-local fallback timer and the missed-ETH_CONNECTED safety net.
+  handleEthernetAddressing();
+  #endif
+
   static bool scanDone = true;
   static byte stacO = 0;
   const unsigned long now = millis();
@@ -1036,18 +1043,6 @@ void WLED::handleConnection()
       }
     }
   }
-
-  #if defined(ARDUINO_ARCH_ESP32) && defined(WLED_USE_ETHERNET)
-  // Catch a missed ETH_CONNECTED. initEthernet() runs from deserializeConfig(), well
-  // before WiFi.onEvent() is registered in setup(), so on a cold boot with the cable
-  // already connected the link can come up and the event fire with nothing listening.
-  // esp_netif still brings the netif up, so poll for "link up but no address" and fix
-  // it rather than sitting unreachable until the cable is replugged.
-  if (ETH.linkUp() && ETH.localIP()[0] == 0) {
-    DEBUG_PRINTLN(F("ETH: link up with no address, applying config"));
-    applyEthernetConfig();
-  }
-  #endif
 
   if (!WLEDNetwork.isConnected()) {
     if (interfacesInited) {

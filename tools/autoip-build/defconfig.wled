@@ -1,0 +1,44 @@
+# Appended to configs/defconfig.common in the lib-builder checkout before ./build.sh.
+#
+# The first option is the entire reason this framework exists. The rest are size trims,
+# chosen by diffing the generated sdkconfig against tasmota's (the framework WLED normally
+# builds against) and keeping only options nothing WLED links can reach.
+#
+# Measured effect of the trims alone: 1,671,630 -> 1,662,584 bytes (-9,046). Small,
+# because the linker already discards unreferenced code; disabling an unused feature does
+# not shrink a binary that was never pulling it in. See README "Size" for the one change
+# that would actually matter.
+
+# --- the point of the exercise ---
+# lwIP self-assigns an RFC 3927 link-local address when DHCP goes unanswered, and keeps
+# the DHCP client running so a lease is still picked up later.
+CONFIG_LWIP_AUTOIP=y
+
+
+# --- size trims: REMOVED ---
+# An earlier revision carried a set of trims copied from tasmota's sdkconfig (heap
+# poisoning off, BLE mesh off, unused mbedTLS curves and ciphers, WiFi CSI off, FreeRTOS
+# into flash, quieter bootloader). They were measured at -9,046 bytes of a 1.67MB image,
+# and they were in the tree when an RMT "flush timeout" regression showed up on hardware.
+# Given the payoff was under 0.6% and they were suspects, they were dropped rather than
+# bisected. Keep this fragment to the one option the build exists for.
+
+# --- deliberately NOT copied from tasmota ---
+#
+# Context for all of these: tasmota's core is tuned to fit WLED into 4MB flash, and that
+# constraint drives most of their config. Where a setting trades a feature for bytes, we
+# do not have to make the same trade -- this environment uses the 1.9MB app partition.
+#
+# CONFIG_ESP_WIFI_ENABLE_WPA3_SAE / _OWE : tasmota disables these, and it is the direct
+#   cause of WLED issue #5568, "esp32 cannot connect to WPA3/PMF Wi-Fi network on v16
+#   (used to work on v15.4)". The maintainers' own diagnosis: "The tasmota core we are
+#   using in 16.0.0 has limitations in the WPA3 / PMF support. It's not our code, it's in
+#   the framework." The issue is still open with no fix for 4MB boards, because the
+#   official core that supports WPA3 does not fit. We enable them, which means this build
+#   can join WPA3/PMF networks that a stock v16 build cannot.
+#   https://github.com/wled/WLED/issues/5568
+# CONFIG_MBEDTLS_CCM_C                   : CCM is reachable from the WPA3/CCMP paths.
+# CONFIG_MBEDTLS_ECP_DP_CURVE25519       : widely negotiated by modern TLS.
+# CONFIG_LOG_DEFAULT_LEVEL=0             : silences ESP-IDF's own error logs, which are
+#   what diagnosed the W5500 driver. Keep them until the board is past bring-up.
+# CONFIG_LIBC_PICOLIBC                   : the big one, but blocked. See README "Size".

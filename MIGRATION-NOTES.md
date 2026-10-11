@@ -83,7 +83,12 @@ unchanged from `attempt1` (MISO 13, MOSI 11, SCLK 12, CS 10, IRQ 9, RST 8, addr 
 They stay compile-time rather than runtime because `initEthernet()` is called from
 `deserializeConfig()`, so the pins must be known before config exists.
 
-### Link-local is now opt-in, and DHCP remains the default
+### Link-local is a runtime setting, and DHCP remains the default
+
+> **Superseded on `w5500-ethernet-autoip`.** The `WLED_ETH_LINK_LOCAL_FALLBACK` compile flag
+> described below became the runtime `ethernetAddrMode` setting (DHCP only / DHCP then
+> link-local / link-local only, default DHCP only). The priority chain is unchanged. If that
+> branch is merged back, this section is superseded by `AUTOIP.md`.
 
 `attempt1` removed the DHCP path outright. That is correct for a lighting segment with
 no DHCP server but would regress every RMII user on a normal network, so
@@ -100,6 +105,14 @@ unique between boards. The underlying reason it is needed at all: a netif cannot
 static address while the DHCP client probes (starting the client zeroes the address), so
 without this the interface sits at `0.0.0.0` for the full lease timeout. lwIP's AUTOIP
 would do this properly, but `CONFIG_LWIP_AUTOIP` is not enabled in the prebuilt libs.
+
+Investigated properly on `w5500-ethernet-autoip`: AUTOIP **would** work if the libraries had
+it — an AUTOIP-assigned address reaches `IP_EVENT_ETH_GOT_IP` through exactly the same path
+as a DHCP one, because esp_netif keys that event on a generic IPv4 address-change callback
+rather than on DHCP state. Enabling it needs a rebuilt framework (one Kconfig line, but a
+private framework fork and a standing maintenance cost). The WLED code there detects
+`CONFIG_LWIP_AUTOIP` at compile time and defers to lwIP when present, so the same source is
+correct either way.
 
 ### Dropped from `attempt1`
 

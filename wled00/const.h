@@ -443,6 +443,10 @@ static_assert(WLED_MAX_BUSSES <= 32, "WLED_MAX_BUSSES exceeds hard limit");
 // they must be numbered last so the ethernetBoards[] static_assert stays meaningful.
 #define WLED_ETH_W5500            16
 
+#ifndef WLED_ETH_DHCP_TIMEOUT
+  #define WLED_ETH_DHCP_TIMEOUT 5000   // ms to wait for a lease before self-assigning
+#endif
+
 
 //Hue error codes
 #define HUE_ERROR_INACTIVE        0
