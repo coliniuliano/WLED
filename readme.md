@@ -54,16 +54,23 @@ Connected! IP address: 169.254.70.125 via Ethernet
   ETH:  169.254.70.125  100Mbps FD (link-local)
 ```
 
-**`esp32s3_w5500_autoip` — boots, but has an open regression.** Ethernet initialises
-correctly and the lwIP AUTOIP path is active (`initE: starting DHCP` rather than WLED
-self-assigning). However the RMT LED driver logs `rmt_tx_wait_all_done: flush timeout`
-once per frame, meaning LED frames are submitted and never complete. The stock framework
-on the same board shows zero of these, so it is introduced by the custom framework.
-Under investigation — the suspects are the IDF/Arduino version jump (5.5.5 / 3.3.12 vs
-5.5.4 / 3.3.8) versus the sdkconfig this fork sets.
+**`esp32s3_w5500_autoip` — boots, LEDs and Ethernet both initialise.** The lwIP AUTOIP
+path is active (`initE: starting DHCP` rather than WLED self-assigning).
 
-**Not yet verified on hardware:** link-local assignment by lwIP, DHCP handover, Art-Net
-over Ethernet, simultaneous WiFi + Ethernet.
+This framework needs one patch, carried in
+[tools/autoip-build/patches/](tools/autoip-build/patches/): ESP-IDF's
+`rmt_tx_wait_all_done()` logs an error even when polled with a zero timeout, which is how
+NeoPixelBus checks whether an LED frame is done, so the console filled at ~40 lines/second.
+Upstream bug [espressif/esp-idf#17527](https://github.com/espressif/esp-idf/issues/17527),
+open. The stock framework hides the same messages by disabling IDF logging entirely; this
+build keeps logging on and fixes the cause instead.
+
+Verified on hardware: lwIP assigns `169.254.126.70` — its own MAC derivation, which is
+how you can tell the address came from lwIP's AUTOIP and not WLED's fallback (that would
+give `169.254.70.125`). 100Mbps full duplex, ~9.6 s from link-up to address.
+
+**Not yet verified:** DHCP handover (needs a switch with a DHCP server), Art-Net over
+Ethernet, simultaneous WiFi + Ethernet.
 
 ## Notes for this rig
 

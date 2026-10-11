@@ -119,11 +119,14 @@ is picolibc vs newlib, and fixing it means carrying patches against the Arduino 
 
 How long before the interface has an address, on a segment with no DHCP server:
 
-| phase | time | tunable? |
+| phase | measured | tunable? |
 |---|---|---|
-| DHCP discovers before self-assign | ~2 s | yes, `CONFIG_LWIP_AUTOIP_TRIES` (left at the IDF default of 2) |
-| RFC 3927 ARP conflict probing | ~4–7 s | **no** |
-| **total** | **~5–9 s** | |
+| reset → Ethernet configured | 2.9 s | 2.5 s of it is `WLED_DEBUG`'s USB CDC delay |
+| → link up detected | 4.9 s | |
+| → address assigned | **14.5 s** | |
+| **link-up → address** | **9.6 s** | only the DHCP discovers, not the probing |
+
+Measured on an ESP32-S3 SuperMini + W5500 with the cable already connected at reset.
 
 The probing is `PROBE_WAIT 1` + 3 probes at `PROBE_MIN/MAX 1–2 s` + `ANNOUNCE_WAIT 2`, from
 `lwip/prot/acd.h`. `autoip_bind()` runs from the `ACD_IP_OK` callback, so the address only
@@ -138,7 +141,8 @@ likely to be taken and then replaced on a network that does have DHCP.
 claimed an address. That is fine with one controller on a segment and silently wrong with
 two whose MACs collide in the low two octets. The seconds buy that check.
 
-**If startup time actually matters, use a static Ethernet IP.** `applyEthernetConfig()`
+**If startup time actually matters, use a static Ethernet IP.** Measured above, AUTOIP
+costs ~9.6 s after link-up. `applyEthernetConfig()`
 calls `ETH.config()` directly on link-up: no DHCP wait, no probing, address live
 immediately, and deterministic across power cycles. AUTOIP is for when you do not want to
 configure anything; a fixed installation with a known address does not need it.

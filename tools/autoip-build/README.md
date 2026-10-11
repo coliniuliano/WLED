@@ -67,11 +67,19 @@ podman run --rm $SEL $PV -v "$PWD/tools/autoip-build":/scripts:ro wled-autoip-bu
   cat /scripts/defconfig.wled >> configs/defconfig.common &&
   rm -f patches/tinyusb/0001-host-esp32s2s3-lowspeed-hub.diff'
 
-# 3. build (~20-40 min first time: clones ESP-IDF and installs toolchains)
+# 3. apply patches for open upstream bugs (see patches/README.md)
+podman run --rm $SEL $PV -v "$PWD/tools/autoip-build/patches":/patches:ro wled-autoip-builder bash -lc '
+  cd /work/lib-builder/esp-idf
+  for p in /patches/esp-idf/*.diff; do
+    git apply --check "$p" 2>/dev/null && git apply "$p" && echo "applied $(basename $p)" \
+      || echo "skipped $(basename $p)"
+  done'
+
+# 4. build (~20-40 min first time: clones ESP-IDF and installs toolchains)
 podman run --rm $SEL $PV wled-autoip-builder bash -lc \
   'cd /work/lib-builder && ./build.sh -t esp32s3'
 
-# 4. assemble the two PlatformIO packages into ~/.platformio/custom
+# 5. assemble the two PlatformIO packages into ~/.platformio/custom
 podman run --rm $SEL $PV -v "$HOME/.platformio/custom":/out \
   -v "$PWD/tools/autoip-build":/scripts:ro \
   wled-autoip-builder bash /scripts/package.sh esp32s3
