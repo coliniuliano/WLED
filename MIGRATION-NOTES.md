@@ -19,7 +19,8 @@ old code without ever showing up as a textual conflict:
    `wled_server.cpp`, `wled.h`.
 
 So: fresh branch off `upstream/main`, design carried over, code re-derived.
-`attempt1` is frozen and tagged (`attempt1-base`, `attempt1-working`).
+The `attempt1` branch has since been deleted; it survives as the `attempt1-base` and
+`attempt1-working` tags, which is what the references to it below mean.
 
 ## The big win: both library forks are gone
 
@@ -85,10 +86,12 @@ They stay compile-time rather than runtime because `initEthernet()` is called fr
 
 ### Link-local is a runtime setting, and DHCP remains the default
 
-> **Superseded on `w5500-ethernet-autoip`.** The `WLED_ETH_LINK_LOCAL_FALLBACK` compile flag
-> described below became the runtime `ethernetAddrMode` setting (DHCP only / DHCP then
-> link-local / link-local only, default DHCP only). The priority chain is unchanged. If that
-> branch is merged back, this section is superseded by `AUTOIP.md`.
+> **Superseded.** This landed on `w5500-ethernet-espidf5` differently from what is described
+> below. The `WLED_ETH_LINK_LOCAL_FALLBACK` compile flag did briefly become a runtime
+> `ethernetAddrMode` dropdown (DHCP only / DHCP then link-local / link-local only), but that
+> was then removed: there is **no user-facing setting**, because there is one correct
+> behaviour. The priority chain is unchanged. See [AUTOIP.md](AUTOIP.md), which supersedes
+> this section.
 
 `attempt1` removed the DHCP path outright. That is correct for a lighting segment with
 no DHCP server but would regress every RMII user on a normal network, so
@@ -106,7 +109,7 @@ static address while the DHCP client probes (starting the client zeroes the addr
 without this the interface sits at `0.0.0.0` for the full lease timeout. lwIP's AUTOIP
 would do this properly, but `CONFIG_LWIP_AUTOIP` is not enabled in the prebuilt libs.
 
-Investigated properly on `w5500-ethernet-autoip`: AUTOIP **would** work if the libraries had
+Investigated properly on `w5500-ethernet-espidf5`: AUTOIP **would** work if the libraries had
 it — an AUTOIP-assigned address reaches `IP_EVENT_ETH_GOT_IP` through exactly the same path
 as a DHCP one, because esp_netif keys that event on a generic IPv4 address-change callback
 rather than on DHCP state. Enabling it needs a rebuilt framework (one Kconfig line, but a
