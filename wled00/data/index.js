@@ -727,6 +727,7 @@ ${inforow("Uptime",getRuntimeStr(i.uptime))}
 ${inforow("Time",i.time)}
 ${inforow("Free heap",(i.freeheap/1024).toFixed(1)," kB")}
 ${i.psram?inforow("Free PSRAM",(i.psram/1024).toFixed(1)," kB"):""}
+${i.socTemp!==undefined?inforow("SoC temperature",i.socTemp," °C"):""}
 <tr><td colspan=2><hr class="sml"></td></tr>
 ${i.leds.count?inforow("Total LEDs",i.leds.count):""}
 ${inforow("Estimated current",pwru)}
