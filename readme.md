@@ -89,31 +89,42 @@ The `_autoip` env needs its framework built first — see
 
 ### Serviceability without USB
 
-A PoE-powered board in an enclosure has no serial port. Two compile-time flags replace it;
-keep them in `platformio_override.ini`, which is gitignored:
+A PoE-powered board in an enclosure has no serial port, so the two flags that replace it are
+**defaults in `platformio.ini`** on both W5500 environments, not local overrides — you cannot
+work on this board without them.
+
+- **`WLED_ENABLE_AOTA`** compiles in ArduinoOTA, so `pio run -t upload` flashes over the
+  network. Without it the code is `#ifdef`'d out and the settings checkbox is hidden
+  entirely. The runtime `aota` setting must also be on, and only takes effect at boot:
+
+  ```bash
+  curl -X POST -H "Content-Type: application/json" -d '{"ota":{"aota":true}}' http://<ip>/json/cfg
+  ```
+
+- **`WLED_DEBUG_HOST`** sends every `DEBUG_PRINT` to UDP instead of Serial — `DEBUGOUT` is
+  one or the other, never both, so defining it means USB stays silent even when connected.
+  Receive with `nc -l -u 7868`. It defaults to the limited broadcast address
+  `255.255.255.255` so it works for whoever is on the segment without baking in a
+  developer's IP, and survives the host changing address or interface. lwIP does not gate
+  broadcast sends on `SO_BROADCAST` here (`IP_SOF_BROADCAST` defaults to 0 and ESP-IDF does
+  not override it). Point it at one host in `platformio_override.ini` if you would rather not
+  flood the broadcast domain.
+
+What stays local, in gitignored `platformio_override.ini`, is only the per-deployment upload
+target:
 
 ```ini
-[env:esp32s3_w5500_net]
-extends = env:esp32s3_w5500_autoip
-build_flags = ${env:esp32s3_w5500_autoip.build_flags}
-  -D WLED_ENABLE_AOTA
-  -D WLED_DEBUG_HOST='"192.168.x.x"'   ;; your host, compile-time only
+[env:esp32s3_w5500_autoip]
 upload_protocol = espota
 upload_port = 169.254.174.98
 upload_flags = --auth=wledota
 ```
 
-- `WLED_ENABLE_AOTA` compiles in ArduinoOTA, so `pio run -t upload` flashes over the
-  network. Without it the code is `#ifdef`'d out and the settings checkbox is hidden.
-  The runtime `aota` setting must also be on, and it only takes effect at boot.
-- `WLED_DEBUG_HOST` redirects every `DEBUG_PRINT` from Serial to UDP. Receive with
-  `nc -l -u 7868`. There is no settings UI for the host, so the IP is baked into the build.
-
-Bootstrapping needs one flash by another route, since ArduinoOTA is not yet running.
+Bootstrapping a board that does not yet have ArduinoOTA needs one flash by another route.
 WLED's own HTTP endpoint does it over Ethernet:
 
 ```bash
-curl -F "update=@.pio/build/esp32s3_w5500_net/firmware.bin" http://169.254.174.98/update
+curl -F "update=@.pio/build/esp32s3_w5500_autoip/firmware.bin" http://169.254.174.98/update
 ```
 
 ## Status
