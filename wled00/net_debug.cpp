@@ -9,11 +9,11 @@ size_t NetworkDebugPrinter::write(uint8_t c) {
     #ifdef ESP8266
       WiFi.hostByName(netDebugPrintHost, debugPrintHostIP, 750);
     #else
-      #ifdef WLED_USE_ETHERNET
-        ETH.hostByName(netDebugPrintHost, debugPrintHostIP);
-      #else
-        WiFi.hostByName(netDebugPrintHost, debugPrintHostIP);
-      #endif
+      // DNS is resolved by lwIP against the resolvers of whichever interface is up, so
+      // the lookup is not interface-specific: NetworkManager::hostByName serves both
+      // WiFi and Ethernet. ETHClass has no hostByName() in arduino-esp32 3.x, so the
+      // former #ifdef WLED_USE_ETHERNET branch did not compile.
+      Network.hostByName(netDebugPrintHost, debugPrintHostIP);
     #endif
   }
 
@@ -30,11 +30,11 @@ size_t NetworkDebugPrinter::write(const uint8_t *buf, size_t size) {
     #ifdef ESP8266
       WiFi.hostByName(netDebugPrintHost, debugPrintHostIP, 750);
     #else
-      #ifdef WLED_USE_ETHERNET
-        ETH.hostByName(netDebugPrintHost, debugPrintHostIP);
-      #else
-        WiFi.hostByName(netDebugPrintHost, debugPrintHostIP);
-      #endif
+      // DNS is resolved by lwIP against the resolvers of whichever interface is up, so
+      // the lookup is not interface-specific: NetworkManager::hostByName serves both
+      // WiFi and Ethernet. ETHClass has no hostByName() in arduino-esp32 3.x, so the
+      // former #ifdef WLED_USE_ETHERNET branch did not compile.
+      Network.hostByName(netDebugPrintHost, debugPrintHostIP);
     #endif
   }
 
