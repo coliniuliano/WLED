@@ -126,6 +126,7 @@
   #include <soc/soc_caps.h>
   #if defined(SOC_TEMP_SENSOR_SUPPORTED) && SOC_TEMP_SENSOR_SUPPORTED
     #define WLED_HAS_SOC_TEMPERATURE
+    #include <driver/temperature_sensor.h>   // installed directly, see socTemperatureInit()
   #endif
 #endif
 // AI: end

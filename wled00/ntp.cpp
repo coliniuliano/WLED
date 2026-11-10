@@ -232,7 +232,11 @@ void handleNetworkTime()
             DEBUG_PRINTLN(F("NTP DNS failed"));
             if (ntpDNSlookup->getErrorCount() > 6) {
               // after 6 failed attempts (30min), reset network connection as dns is probably stuck (TODO: IDF bug, should be fixed in V5)
-              if (offMode) forceReconnect = true; // do not disturb while LEDs are running
+              // Only worth cycling WiFi if WiFi is what we depend on. On a segment with
+              // no DNS server -- a link-local Ethernet rig -- lookups fail forever, and
+              // tearing the station (and with it the rescue AP) down every 30 minutes
+              // fixes nothing. See WLED_AP_RESCUE in cfg.cpp.
+              if (offMode && !WLEDNetwork.isEthernetUp()) forceReconnect = true; // do not disturb while LEDs are running
               ntpDNSlookup.reset();
             } else {
               // Retry

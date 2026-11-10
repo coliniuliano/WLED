@@ -11,6 +11,7 @@ class NetworkDebugPrinter : public Print {
   public:
     virtual size_t write(uint8_t c);
     virtual size_t write(const uint8_t *buf, size_t s);
+    void resetHost() { debugPrintHostIP = IPAddress(); }   // re-resolve netDebugPrintHost on the next write
 };
 
 // use it on your linux/macOS with: nc -p 7868 -u -l -s <network ip>

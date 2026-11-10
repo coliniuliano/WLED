@@ -14,6 +14,35 @@
 # the DHCP client running so a lease is still picked up later.
 CONFIG_LWIP_AUTOIP=y
 
+# --- restore tasmota's lwIP threading model ---
+# lib-builder's output has CONFIG_LWIP_TCPIP_CORE_LOCKING=y and
+# CONFIG_LWIP_CHECK_THREAD_SAFETY=y; tasmota's core has both off. The divergence is fatal
+# here: WLED creates UDP PCBs from the Arduino task without holding the lwIP core lock, so
+# with the check enabled the first UDP service to start after WiFi associates trips
+#   assert failed: udp_new_ip_type .../lwip/src/core/udp.c:1278
+#   (Required to lock TCPIP core functionality!)
+# and the board panics and reboots every few seconds, indefinitely. Observed on hardware
+# 2026-11-09: boot, associate, panic, repeat -- which from the router's side looks like a
+# WiFi association problem, not a crash.
+#
+# Neither option can be turned off directly. Both are Kconfig `select`ed by esp_matter:
+#   connectedhomeip/config/esp32/components/chip/Kconfig
+#     config USE_TCPIP_CORE_LOCK_FOR_THREAD_SAFETY
+#       default y
+#       select LWIP_TCPIP_CORE_LOCKING
+#       select LWIP_CHECK_THREAD_SAFETY
+# and a `select` cannot be overridden by a defconfig assignment -- setting the two lwIP
+# options to n here would be silently ignored. The gate is what has to change, and it is a
+# plain `default y` that nothing selects, so it can be.
+#
+# This is not a workaround: that option's own help text says the alternative is that "CHIP
+# SDK will post LwIP APIs to TCPIP task to ensure thread safety" -- the message-passing
+# model, which is what WLED is written against and what every stock build uses. Matter is
+# unaffected other than using that path; WLED does not use Matter at all.
+#
+# AUTOIP is independent of all of this.
+CONFIG_USE_TCPIP_CORE_LOCK_FOR_THREAD_SAFETY=n
+
 
 # --- size trims: REMOVED ---
 # An earlier revision carried a set of trims copied from tasmota's sdkconfig (heap

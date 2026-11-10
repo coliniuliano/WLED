@@ -53,10 +53,67 @@ are per-interface accessors, and UDP sync, node discovery and Art-Net poll repli
 whichever interface the request arrived on — so the rig can be reachable from a laptop on
 WiFi while Art-Net flows over the wire.
 
-**SoC temperature in the Info panel.** Cheap to read and useful in an enclosure that has no
-other instrumentation. Uses the Arduino core's `temperatureRead()`, which already owns the
-single `temperature_sensor` driver instance, and is guarded so non-S3 targets still build.
-*In the UI:* a "SoC temperature" row, in °C.
+**SoC temperature in the Info panel.** The only instrumentation an enclosed board has. The
+sensor is installed directly with a 20–100 °C range rather than through the Arduino core's
+`temperatureRead()`, whose hardcoded 10–50 °C hint selects a hardware range that ends at
+80 °C — right where this board was sitting, so the reading would have saturated exactly when
+it mattered. *In the UI:* a "SoC temperature" row, in °C; also `socTemp` in `/json/info` and in
+the 30 s debug report.
+
+**The radio is the heat.** Measured in free air, LEDs and Ethernet unplugged, same board, same
+spot: 78 °C with the access point on and the WiFi radio never sleeping; 76 °C with the AP
+closed; **55 °C once the WiFi radio was allowed to modem-sleep**; and still 55 °C with TX power
+cut from 19.5 dBm to 11 dBm on top — transmit duty cycle is ~1 %, so TX power is left at the
+default for link margin. A soft-AP must beacon, so ESP-IDF cannot power-save while one is
+up — which is why the AP is no longer left on permanently. Modem sleep costs latency on
+*incoming* traffic (ping averaged 180 ms against the router's DTIM period; HTTP stayed at
+40 ms). That is fine for the web UI, and realtime data arrives over Ethernet on this rig, so
+sleep is simply on whenever the AP is closed. The "Disable WiFi sleep" setting still wins if
+ticked; it is an ordinary WiFi setting, not a build flag, and the deployed config has sleep
+enabled.
+
+**The access point is a rescue path, not a feature.** This hardware is potted. If it ever talks
+itself out of every network there is no USB to fall back on, so the rule is simple and has no
+exceptions: if there is no WiFi connection, the AP is up; as soon as WiFi connects, it closes.
+That includes the few seconds at boot while WiFi comes up, which costs a brief `WLED-AP`
+appearance and nothing else. This has to work *with Ethernet up*
+too, which upstream never considered: every AP decision sat behind "is any interface
+connected", so a PoE-powered board whose WiFi had gone away would never open one, and never
+retry WiFi either. `WLED_AP_RESCUE` (a default build flag here) adds that case — with
+Ethernet up, WiFi is retried 30 s ×3 then every 5 min, never during a realtime stream and
+never while a phone is on the AP — and refuses any AP behaviour setting weaker than "open
+when no connection". "Always" is still allowed, at the cost of the heat above. One more
+upstream assumption had to go for this to hold: the WiFi disconnect handler treated "any
+interface was connected" as "WiFi dropped", so with Ethernet up every failed WiFi attempt
+(one every ~2.5 s with the network absent) forced a reconnect, re-ran interface setup and
+closed the AP — measured as the AP blinking off every few seconds. It now only reacts to a
+WiFi connection that was actually up. Two
+upstream behaviours that broke this path are fixed as well: `initConnection()` reset the whole
+radio (`WIFI_MODE_NULL`) on every WiFi reconnect attempt, destroying the AP mid-handshake so a phone
+could never finish joining; and a stuck DNS lookup cycled WiFi — AP included — every 30 min,
+which on a resolver-less Ethernet segment fixes nothing and never stops.
+
+**The panic loop, root-caused.** The board had been rebooting every NTP lookup. Decoded from the
+core dump against the matching ELF: `handleNetworkTime → AsyncDNS::query → dns_gethostbyname →
+… → udp_new_ip_type`, asserting on lwIP's thread-safety check. Two WLED call sites use raw lwIP
+from the Arduino task (`asyncDNS.h`, upstream since January, and multicast sACN's
+`igmp_joingroup()`). That is correct under lwIP's default message-passing model, which every
+stock build uses, and a data race under core locking — and the custom framework had core
+locking *and* the assertion on, because esp_matter Kconfig-`select`s them. The framework is
+returned to the default model (`CONFIG_USE_TCPIP_CORE_LOCK_FOR_THREAD_SAFETY=n`, the only gate
+a defconfig can reach), and both call sites now take the lock when a build asks for it, so the
+option stays open. Locking off is deliberate: under it, any unlocked lwIP call anywhere in the
+image bricks a potted board; under message passing the same omission is simply correct.
+
+**Everything over the network.** Firmware: WLED's `/update` and ArduinoOTA. Config: the web UI
+and `/json/cfg`. Logs: `DEBUG` output goes to UDP, and the destination is now a runtime setting
+(`{"dbg":{"host":"192.168.10.110","port":7868}}` on `/json/cfg`) because the compile-time
+broadcast default never leaves the local segment and the person debugging usually is not on
+it. Crashes: `GET /coredump` streams the ELF core dump the panic handler leaves in flash
+(`esp-coredump info_corefile -t elf -c coredump.elf firmware.elf`), `/coredump?erase` clears
+it, and `/json/info` reports `coredump: true` when one is waiting. The WiFi disconnect reason
+code is logged too, because the stock event handler says nothing at all for a WiFi
+connection that never comes up.
 
 **`net_debug` builds on Ethernet.** Its host lookup called `ETH.hostByName()`, which does not
 exist on `ETHClass` in arduino-esp32 3.x, so the Ethernet branch had never compiled — nothing
@@ -77,11 +134,11 @@ match the ESP32-S3 SuperMini wiring. See `wled00/wled_ethernet.h`.
 
 | env | framework | use when |
 |---|---|---|
-| `esp32s3_w5500` | stock (tasmota, as upstream WLED ships) | **default.** Hardware-verified |
-| `esp32s3_w5500_autoip` | custom-built with `CONFIG_LWIP_AUTOIP=y` | when you want lwIP to do RFC 3927 itself |
+| `esp32s3_w5500_autoip` | custom-built with `CONFIG_LWIP_AUTOIP=y` | **what the board runs.** lwIP does RFC 3927 itself; also the only one with a core dump partition |
+| `esp32s3_w5500` | stock (tasmota, as upstream WLED ships) | fallback that needs no custom framework; hand-rolled link-local, no `/coredump` |
 
 ```bash
-pio run -e esp32s3_w5500 --target upload
+pio run -e esp32s3_w5500_autoip --target upload    # espota, target in platformio_override.ini
 ```
 
 The `_autoip` env needs its framework built first — see
@@ -107,8 +164,13 @@ work on this board without them.
   `255.255.255.255` so it works for whoever is on the segment without baking in a
   developer's IP, and survives the host changing address or interface. lwIP does not gate
   broadcast sends on `SO_BROADCAST` here (`IP_SOF_BROADCAST` defaults to 0 and ESP-IDF does
-  not override it). Point it at one host in `platformio_override.ini` if you would rather not
-  flood the broadcast domain.
+  not override it). Limited broadcast does not cross a router, so from another subnet set the
+  destination at runtime instead (it persists in `cfg.json`):
+
+  ```bash
+  curl -X POST -H "Content-Type: application/json" -d '{"dbg":{"host":"192.168.10.110","port":7868}}' http://<ip>/json/cfg
+  nc -l -u 7868
+  ```
 
 What stays local, in gitignored `platformio_override.ini`, is only the per-deployment upload
 target:
@@ -135,23 +197,24 @@ GPIO 1):
 - `esp32s3_w5500` and `esp32s3_w5500_autoip` both boot with Ethernet up at 100Mbps full
   duplex. The address is deterministic: lwIP's AUTOIP seeds from the Ethernet MAC, so the
   same board always lands on the same `169.254.x.y`.
-- Which code path assigned the address is visible in the address itself — lwIP's derivation
-  and WLED's fallback produce different hosts from the same MAC.
-- OTA over Ethernet: HTTP `/update` takes ~6 s for a 1.7MB image; espota ~35 s.
-- `WLED_DEBUG_HOST` logging over Ethernet.
-- `socTemp` reports plausible values (52.4 °C idle).
+- OTA over Ethernet (HTTP `/update` ~6 s, espota ~35 s) and over WiFi (espota, by mDNS name).
+- Debug logging over UDP to a host on a *different* subnet, set at runtime via `/json/cfg`.
+- `/coredump`: 404 with nothing stored, erase works, `coredump` flag in `/json/info`.
+- WiFi + AP coexistence on one channel, and the AP surviving reconnect attempts (a phone
+  joined `WLED-AP` while WiFi was failing with a wrong key, then restored the credentials).
+- **The rescue AP with Ethernet up**, tested over the wire by pointing WiFi at a network that
+  does not exist and rebooting: AP up 13 s after boot and never interrupted (0 `AP Stopped`
+  in the log), WiFi retried at exactly 30 s and 60 s with the AP kept open, Ethernet
+  serving the web UI throughout; then WiFi restored → connected, AP closed, sleep on.
+- Boot with Ethernet and WiFi both available: both up (100 Mbps full duplex link-local +
+  WiFi), AP closed, radio sleeping.
+- The thermal figures above, each held steady for several minutes before being read.
+- The lwIP fix at runtime: NTP enabled over WiFi, which runs the exact `dns_gethostbyname()`
+  call that used to assert — `NTP IP resolved`, time synced 23 s after boot, five minutes
+  watched with no reboot and no core dump.
 
-**Not verified:** DHCP handover (needs a switch with a DHCP server), Art-Net over Ethernet
-under load, simultaneous WiFi + Ethernet — the WiFi interface has been down in recent
-testing while Ethernet carried everything.
-
-**Open issue — intermittent panic.** The board reboots occasionally with WLED's error 90
-(`ERR_SYS_REBOOT`) and `resetReason0/1 = 12` (`RTC_SW_CPU_RESET`). That combination means
-the panic handler ran: `errorFlag` is only set to 90 under `ResetReason::Crash`, which needs
-`esp_reset_reason()` to be `PANIC` or a watchdog. It is **not** a brownout — that is error 91
-and RTC reason 15 — so PoE power delivery is not implicated. No backtrace yet: the board has
-no USB, and reading the coredump partition over the network needs firmware support that is
-not written (see below).
+**Not verified:** DHCP handover (needs a switch with a DHCP server); Art-Net over Ethernet
+under load.
 
 ## Notes for this rig
 
@@ -159,26 +222,27 @@ not written (see below).
 no DHCP wait, no RFC 3927 conflict probing, same address every power cycle. Link-local
 takes ~5–9 s, most of which is mandatory ARP probing.
 
-**`esp32s3_w5500_autoip` uses a 1.9MB app partition** (vs 1.5MB), because its framework
-produces a ~495kB larger binary. It sits at 87.9% full, or 88.9% with ArduinoOTA and
-`net_debug` added. OTA still works — the layout keeps two app slots — but the filesystem
-drops from 1MB to 256kB, and switching between the two environments reformats it.
+**Deployed WiFi settings:** AP behaviour "open when no connection", WiFi sleep enabled, TX
+power at the default. A config wipe returns sleep to WLED's default (off) — hot but safe;
+the AP behaviour floor is compiled in and survives. A further lever, not taken: the CPU runs
+at 240 MHz and 160 MHz would shave a few more degrees, but it touches LED timing and 29
+pixels do not need it.
 
-**A crash dump is waiting in flash and there is no way to read it.** `big_partitions`
-reserves a 64K `coredump` partition and the framework has
-`CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y` with the ELF format, so panics are recorded. But
-`espota` and `/update` are write-only and `/edit` only sees the filesystem, so extracting it
-needs either USB or ~30 lines of firmware exposing `esp_core_dump_image_get()` over HTTP.
+**`esp32s3_w5500_autoip` uses a 1.9MB app partition** (vs 1.5MB), because its framework
+produces a ~495kB larger binary. It sits at 89% full. OTA still works — the layout keeps two
+app slots — but the filesystem drops from 1MB to 256kB, and switching between the two
+environments reformats it.
 
 **Keep the ELF if you want to decode a dump.** `esp_coredump` needs the exact
 `firmware.elf` that was running when the panic happened, and PlatformIO wipes every build
 directory whenever the project config changes — adding `platformio_override.ini` is enough
-to do it. Copy `firmware.elf` somewhere safe before changing build config.
+to do it. Copy `firmware.elf` somewhere safe before changing build config
+(`build_output/` is gitignored and is where the running build's ELF is kept).
 
-**`WLED_DEBUG` is on** in both environments. Turn it off for a deployment: it costs flash,
-and on a PoE-only board the USB CDC TX path can stall the main loop (see
-`Serial.setTxTimeoutMs(0)` in `wled00/wled.cpp`). Note that defining `WLED_DEBUG_HOST`
-moves this output off Serial entirely — `DEBUGOUT` is one or the other, not both.
+**`WLED_DEBUG` is on** in both environments. It costs flash, and on a PoE-only board the USB
+CDC TX path can stall the main loop (see `Serial.setTxTimeoutMs(0)` in `wled00/wled.cpp`).
+Defining `WLED_DEBUG_HOST` moves this output off Serial entirely — `DEBUGOUT` is one or the
+other, not both.
 
 ## Documentation
 

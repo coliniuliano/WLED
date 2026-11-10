@@ -92,7 +92,7 @@ Sanity checks:
 
 ```bash
 grep -c '^CONFIG_LWIP_AUTOIP=y' ~/.platformio/custom/framework-arduinoespressif32-libs-autoip/esp32s3/sdkconfig   # 1
-grep -oE '\bautoip_(start|stop|bind|supplied_address)\b' .pio/build/esp32s3_w5500_autoip/firmware.map | sort -u   # 4 names
+grep -oE '\bautoip_(start|stop|accept_packet|supplied_address)\b' .pio/build/esp32s3_w5500_autoip/firmware.map | sort -u   # 4 names
 ```
 
 ## Two rules that matter
@@ -143,15 +143,19 @@ inlines them and fails loudly if any build-tree path survives.
 
 ## Size
 
-1,662,584 bytes, 87.5% of the 1.9 MB app partition that `esp32s3_w5500_autoip` selects.
-That is ~495 kB more than the same WLED built against tasmota's framework (1,167,635).
-**OTA is unaffected** — the layout keeps two app slots — but the filesystem drops from
-1 MB to 256 kB.
+1,690,718 bytes, 89.0% of the 1.9 MB app partition that `esp32s3_w5500_autoip` selects
+(with ArduinoOTA, network debug and the `/coredump` endpoint compiled in). That is ~500 kB
+more than the same WLED built against tasmota's framework (1,184,307). **OTA is
+unaffected** — the layout keeps two app slots — but the filesystem drops from 1 MB to 256 kB.
 
-`defconfig.wled` carries size trims chosen by diffing against tasmota's sdkconfig. They are
-worth having but they are not the answer: measured on their own they saved **9,046 bytes**.
-The reason is simple in hindsight — the linker already discards unreferenced code, so
-turning off a feature nothing was calling does not shrink anything.
+`defconfig.wled` deliberately carries **no** size trims any more. An earlier revision had a
+set chosen by diffing against tasmota's sdkconfig; measured on their own they saved
+**9,046 bytes** — the linker already discards unreferenced code, so turning off a feature
+nothing was calling does not shrink anything — and they were dropped when an RMT regression
+appeared while they were in the tree. The fragment is now two options: `CONFIG_LWIP_AUTOIP=y`,
+which is the point, and `CONFIG_USE_TCPIP_CORE_LOCK_FOR_THREAD_SAFETY=n`, which returns
+lwIP to the message-passing threading model every stock build uses (the comment in the file
+explains why that gate, and not the two lwIP options it selects, is the only lever).
 
 ### What would actually matter, and why it is blocked
 
