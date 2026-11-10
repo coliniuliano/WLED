@@ -327,6 +327,8 @@ void fillStr2MAC(uint8_t *mac, const char *str);
 int  findWiFi(bool doScan = false);
 #ifdef ARDUINO_ARCH_ESP32
 void wifiStaReasonEvent(arduino_event_id_t event, arduino_event_info_t info);
+unsigned long wifiLastFailureMs();      // when the last WiFi attempt failed; rescue_network.cpp paces retries from it
+unsigned long wifiLastAssociatedMs();   // when the station last associated (DHCP may still be running)
 #endif
 bool isWiFiConfigured();
 void installIPv6RABlocker();

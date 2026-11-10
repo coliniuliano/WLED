@@ -657,6 +657,10 @@ static bool wifiLinkWasUp = false;   // WiFi had an IP; cleared when it drops (s
 // from. Each step is recorded in the netlog and shows in /json/info as wifi.txPower.
 static constexpr uint8_t WIFI_TXPOWER_STEPDOWN_AFTER = 3;
 static uint8_t wifiAuthTimeouts = 0;
+static unsigned long wifiLastFailure = 0;      // millis() of the last attempt that ended in a failure (not our own disconnect)
+static unsigned long wifiLastAssociated = 0;   // millis() of the last association; a failure older than this is history
+unsigned long wifiLastFailureMs()    { return wifiLastFailure; }
+unsigned long wifiLastAssociatedMs() { return wifiLastAssociated; }
 
 static uint8_t wifiTxPowerBelow(uint8_t p)
 {
@@ -671,7 +675,8 @@ void wifiStaReasonEvent(arduino_event_id_t event, arduino_event_info_t info)
   const uint8_t reason = info.wifi_sta_disconnected.reason;
   const int8_t  rssi   = info.wifi_sta_disconnected.rssi;
   DEBUG_PRINTF_P(PSTR("WiFi-E: STA disconnected, reason %u, rssi %d @ %lus\n"), (unsigned)reason, (int)rssi, millis()/1000);
-  netlogAdd(NL_STA_DISCONNECTED, reason, rssi);
+  if (reason != WIFI_REASON_STA_LEAVING) netlogAdd(NL_STA_DISCONNECTED, reason, rssi);   // 36 is our own disconnect() at the start of every attempt
+  if (reason != WIFI_REASON_STA_LEAVING && reason != WIFI_REASON_ASSOC_LEAVE) wifiLastFailure = millis();   // a verdict on the attempt, not our own disconnect()
 
   const bool authTimeout = reason == WIFI_REASON_AUTH_EXPIRE || reason == WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT || reason == WIFI_REASON_HANDSHAKE_TIMEOUT;
   if (!authTimeout) return;   // NO_AP_FOUND, a deliberate leave etc. say nothing about our transmitter
@@ -712,6 +717,7 @@ void WiFiEvent(WiFiEvent_t event)
     case ARDUINO_EVENT_WIFI_STA_CONNECTED:
       // followed by IDLE and SCAN_DONE
       DEBUG_PRINTF_P(PSTR("WiFi-E: Connected! @ %lus\n"), millis()/1000);
+      wifiLastAssociated = millis();
       netlogAdd(NL_STA_CONNECTED);
       wasConnected = true;
       break;
@@ -742,17 +748,18 @@ void WiFiEvent(WiFiEvent_t event)
     case ARDUINO_EVENT_WIFI_READY:
       DEBUG_PRINTLN(F("WiFi-E: driver ready."));
       break;
+    case ARDUINO_EVENT_WIFI_OFF:
+      DEBUG_PRINTLN(F("WiFi-E: WiFi off."));
+      break;
     case ARDUINO_EVENT_WIFI_SCAN_DONE:
       // also triggered when connected to selected SSID
       DEBUG_PRINTLN(F("WiFi-E: SSID scan completed."));
       break;
     case ARDUINO_EVENT_WIFI_STA_START:
       DEBUG_PRINTLN(F("WiFi-E: STA Started"));
-      netlogAdd(NL_STA_START);
       break;
     case ARDUINO_EVENT_WIFI_STA_STOP:
       DEBUG_PRINTLN(F("WiFi-E: STA Stopped"));
-      netlogAdd(NL_STA_STOP);
       break;
     case ARDUINO_EVENT_WIFI_STA_AUTHMODE_CHANGE:
       DEBUG_PRINTLN(F("WiFi-E: STA authentication mode change."));
@@ -764,11 +771,11 @@ void WiFiEvent(WiFiEvent_t event)
 
     case ARDUINO_EVENT_WIFI_AP_START:
       DEBUG_PRINTLN(F("WiFi-E: AP Started"));
-      netlogAdd(NL_AP_START, apActive);
+      if (apActive) netlogAdd(NL_AP_START, apActive);   // mode changes flap the AP netif on every WiFi attempt; only an AP we count as open is worth a line
       break;
     case ARDUINO_EVENT_WIFI_AP_STOP:
       DEBUG_PRINTLN(F("WiFi-E: AP Stopped"));
-      netlogAdd(NL_AP_STOP, apActive);   // 1 here = the driver closed an AP the firmware still counts on
+      if (apActive) netlogAdd(NL_AP_STOP, apActive);   // the driver closed an AP the firmware still counts on
       break;
     #if defined(WLED_USE_ETHERNET)
     case ARDUINO_EVENT_ETH_START:

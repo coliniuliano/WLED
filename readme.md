@@ -112,18 +112,40 @@ was tried as well and made no visible difference on its own; it was removed. So 
 fix covers both symptoms, and the netlog records the driver's AP state next to the
 firmware's should they ever disagree for another reason.
 
-**The access point is a rescue path, not a feature.** This hardware is potted. If it ever talks
-itself out of every network there is no USB to fall back on, so the rule is simple and has no
-exceptions: if there is no WiFi connection, the AP is up; as soon as WiFi connects, it closes.
-That includes the few seconds at boot while WiFi comes up, which costs a brief `WLED-AP`
-appearance and nothing else. This has to work *with Ethernet up*
-too, which upstream never considered: every AP decision sat behind "is any interface
-connected", so a PoE-powered board whose WiFi had gone away would never open one, and never
-retry WiFi either. `WLED_AP_RESCUE` (a default build flag here) adds that case — with
-Ethernet up, WiFi is retried 30 s ×3 then every 2 min, never during a realtime stream and
-never while a phone is on the AP — and refuses any AP behaviour setting weaker than "open
-when no connection". "Always" is still allowed, at the cost of the heat above. One more
-upstream assumption had to go for this to hold: the WiFi disconnect handler treated "any
+**The access point is a rescue path, not a feature.** This hardware is potted and its real
+deployments are venues with no WiFi at all, so "no WiFi → AP open" would mean running hot
+by default (an AP cannot modem-sleep). The policy lives in one file, `rescue_network.cpp`,
+as four rules applied every loop from the current facts:
+
+1. WiFi up → AP closed, radio sleeps. The normal state, ~55 °C.
+2. WiFi lost, or absent at boot → AP open for **5 minutes** — long enough to join and read
+   `/netlog` — and for as long as someone is on it.
+3. Window over, WiFi still down → AP closed, WiFi retried **every 10 s** (paced from the
+   previous attempt's failure, never while a phone is on the AP or realtime data is
+   flowing), radio off between attempts. Ethernet is the way in; it is also the power.
+4. No Ethernet address and no WiFi → AP stays open, the only way in. On PoE that is a
+   bench, not a venue.
+
+`{"wifi":{"ap":true}}` on `/json/state` (WLED's existing key) opens a 5-minute window on
+demand (over Ethernet, to hand a phone a path); `{"wifi":{"ap":false}}` closes it. "AP always" in the WiFi settings is honoured as a
+permanent rule 4; any weaker AP behaviour is refused (`WLED_AP_RESCUE`, a default build flag
+here). Every open and close is a netlog entry with its reason. This is the shape ESPHome
+(`ap_timeout`), Tasmota's WiFi manager and WLED's own "Temporary" behaviour converge on; the
+difference is that a wired path that doubles as power makes "then close it" safe here where
+it is not for a battery or wall-wart device. Measured: with the AP closed and WiFi retrying
+every 10 s, the die fell from 75 °C to 63 °C in nine minutes and was still falling — the
+radio is off between attempts (ESP-IDF's disconnected-state power management), so the
+10 s cadence costs nothing worth having. The first run of this policy also found a crash:
+with the AP closed, upstream's reconnect path (`WiFi.disconnect(true)`) left *no* WiFi
+interface, so the framework deinitialised the whole stack every retry, and the `WIFI_OFF`
+event raced the teardown — the core dump (fetched over `/coredump`, decoded against the kept
+ELF) showed the debug printer on the event task reading the station netif as it was
+destroyed. Policy retries now keep the station interface (`initConnection(false)`), and
+the network helpers check status bits before touching a netif. Upstream never considered
+the Ethernet-up case:
+every AP decision sat behind "is any interface connected", so a PoE-powered board whose WiFi
+had gone away would never open one, and never retry WiFi either; those upstream branches
+are compiled out in this build. One more upstream assumption had to go for this to hold: the WiFi disconnect handler treated "any
 interface was connected" as "WiFi dropped", so with Ethernet up every failed WiFi attempt
 (one every ~2.5 s with the network absent) forced a reconnect, re-ran interface setup and
 closed the AP — measured as the AP blinking off every few seconds. It now only reacts to a
@@ -152,11 +174,13 @@ broadcast default never leaves the local segment and the person debugging usuall
 it. Crashes: `GET /coredump` streams the ELF core dump the panic handler leaves in flash
 (`esp-coredump info_corefile -t elf -c coredump.elf firmware.elf`), `/coredump?erase` clears
 it, and `/json/info` reports `coredump: true` when one is waiting. Network history:
-`GET /netlog` lists the last 96 WiFi, AP and Ethernet events — every connection attempt,
+`GET /netlog` lists the last 192 WiFi, AP and Ethernet events — every connection attempt,
 every disconnect with its reason code and RSSI, every AP open/close as the firmware decided
 it *and* as the driver reported it, TX power steps, sleep changes, and the reset reason of
 each boot — kept in RTC memory so it survives a software reset, panic or watchdog (not a
-power cycle). The Info panel shows the most recent WiFi drop with its reason and age, and
+power cycle). A retry loop that changes nothing is written three times in full and then
+sampled every 30th repetition, so the entry that matters — what happened *before* the
+loop started — is not pushed out in minutes (it was, the first time it was needed). The Info panel shows the most recent WiFi drop with its reason and age, and
 the WiFi and Ethernet addresses separately. The stock event handler said nothing at all for
 a WiFi connection that never came up; the ten-hour outage above was diagnosed from a single
 reason code caught live, which is what this replaces.
@@ -226,6 +250,13 @@ work on this board without them.
   curl http://<ip>/netlog?clear
   ```
 
+- **The rescue AP on demand**, when you have the wire and want a phone on the board:
+
+  ```bash
+  curl -X POST -H "Content-Type: application/json" -d '{"wifi":{"ap":true}}' http://<ip>/json/state   # WLED-AP for 5 min, longer while in use
+  curl -X POST -H "Content-Type: application/json" -d '{"wifi":{"ap":false}}' http://<ip>/json/state
+  ```
+
 What stays local, in gitignored `platformio_override.ini`, is only the per-deployment upload
 target:
 
@@ -274,6 +305,13 @@ GPIO 1):
   on the third; `WLED-AP` (moved to channel 11 by the driver, invisible at full power)
   back in the Mac's scan one second later at −51 dBm; next attempt at 330 s associated in
   3 s, IP 8 s later, AP closed, modem sleep on. Every step in `/netlog`.
+- **The rescue policy** (`rescue_network.cpp`): boot with WiFi available → AP open at
+  3.4 s, closed at 15.6 s when WiFi got its address, sleep on. Boot without WiFi → AP open,
+  attempts every 10.0 s, `AP closed (window over)` at 5:03, sleep on, 75 → 63 °C over the
+  next nine minutes; `{"wifi":{"ap":true}}` reopened it, `false` closed it; restoring the
+  SSID connected on the next attempt. After the crash fix: 38 retries with the AP closed,
+  zero `WIFI_OFF` events and zero full teardowns in the debug capture, no core dump,
+  reconnected 7 s after the SSID was restored.
 - `/netlog` over WiFi and over Ethernet after the OTA that introduced it: boot reason,
   every attempt, the driver's AP restart as WiFi joined channel 11, `AP closed`,
   `modem sleep on`. After the next OTA the log read `current boot #2` with every boot #1
@@ -284,7 +322,9 @@ GPIO 1):
 **Not verified:** DHCP handover (needs a switch with a DHCP server); Art-Net over Ethernet
 under load; whether the channel-11 failure also occurs at full power on a *cool* board (it
 connected on channel 11 at full power all the previous day, so presumably not — but it was
-not re-measured once the cause was known).
+not re-measured once the cause was known); the `WIFI_OFF` race fix beyond "did not recur" —
+it was a race hit once in ~40 retries, and the fix removes the teardown that opened the
+window rather than the window itself, which a 95 s run cannot prove.
 
 ## Notes for this rig
 

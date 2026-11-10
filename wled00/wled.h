@@ -213,6 +213,7 @@ using PSRAMDynamicJsonDocument = BasicJsonDocument<PSRAM_Allocator>;
 #include "colors.h"
 #include "fcn_declare.h"
 #include "netlog.h"
+#include "rescue_network.h"
 #ifndef WLED_DISABLE_OTA
   #include "ota_update.h"
 #endif
@@ -975,7 +976,7 @@ public:
   void beginStrip();
   void handleConnection();
   void initAP(bool resetAP = false);
-  void initConnection();
+  void initConnection(bool fullReset = true);   // fullReset=false: a retry that keeps the station interface up (rescue_network.cpp)
   void initInterfaces();
   #if defined(STATUSLED)
   void handleStatusLED();

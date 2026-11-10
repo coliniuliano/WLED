@@ -19,24 +19,36 @@
 // meaning depends on the event (documented per value below).
 enum NetlogEvent : uint8_t {
   NL_BOOT = 1,               // a = esp_reset_reason_t of this boot
-  NL_STA_START,
+  NL_STA_START,              // no longer emitted (every attempt produced a pair); kept so stored logs decode
   NL_STA_STOP,
   NL_STA_CONNECTED,          // associated and authenticated, no IP yet
   NL_STA_DISCONNECTED,       // a = wifi_err_reason_t, b = RSSI of the AP at the time
   NL_STA_GOT_IP,             // a = last octet of the address
   NL_STA_LOST_IP,
-  NL_AP_START,               // driver event. a = apActive as the firmware believed it
-  NL_AP_STOP,                // driver event. a = apActive -- 1 with no NL_AP_START after it means the firmware lost track of the AP
+  NL_AP_START,               // driver event, logged only while the firmware counts the AP as open
+  NL_AP_STOP,                // driver event, logged only while the firmware counts the AP as open: the driver closed an AP we rely on
   NL_AP_CLIENT_CONNECTED,    // a = clients after the change
   NL_AP_CLIENT_DISCONNECTED, // a = clients after the change
   NL_ETH_CONNECTED,          // link up
   NL_ETH_GOT_IP,             // a = last octet, b = 1 when link-local (AUTOIP)
   NL_ETH_DISCONNECTED,
   NL_INIT_CONNECTION,        // firmware started a WiFi connection attempt. a = apActive
-  NL_AP_OPEN,                // firmware opened the access point. a = channel
-  NL_AP_CLOSE,               // firmware closed the access point
+  NL_AP_OPEN,                // firmware opened the access point. a = channel, b = NetlogApReason
+  NL_AP_CLOSE,               // firmware closed the access point. b = NetlogApReason
   NL_TX_POWER,               // transmit power changed at runtime. a = new wifi_power_t value
   NL_SLEEP,                  // a = 1 modem sleep enabled, 0 disabled
+};
+
+// Why the access point opened or closed (rescue_network.cpp). 0 = upstream WLED logic.
+enum NetlogApReason : uint8_t {
+  AP_REASON_UPSTREAM = 0,
+  AP_REASON_BOOT,          // no WiFi yet at boot: window open
+  AP_REASON_WIFI_LOST,     // WiFi dropped: window open
+  AP_REASON_NO_NETWORK,    // neither WiFi nor Ethernet: open until one returns
+  AP_REASON_REQUESTED,     // {"ap":true|false} on /json/state
+  AP_REASON_ALWAYS,        // "AP always" in the WiFi settings
+  AP_REASON_WIFI_UP,       // WiFi connected: closed
+  AP_REASON_WINDOW_OVER,   // window elapsed with nobody on it: closed
 };
 
 #ifdef ARDUINO_ARCH_ESP32
