@@ -472,7 +472,7 @@ float socTemperatureRead()
 // WiFi reconnect cadence when Ethernet is already up: a few quick attempts, then slow.
 static constexpr uint8_t  WIFI_RETRY_FAST_COUNT = 3;
 static constexpr unsigned long WIFI_RETRY_FAST_MS = 30000;
-static constexpr unsigned long WIFI_RETRY_SLOW_MS = 300000;
+static constexpr unsigned long WIFI_RETRY_SLOW_MS = 120000;   // then every 2 min: three failures at this cadence is what triggers a TX power step-down (network.cpp)
 
 #ifdef ARDUINO_ARCH_ESP32
 // WiFi modem-sleep policy. The radio is the one heat source the firmware controls, and

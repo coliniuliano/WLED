@@ -85,7 +85,10 @@ through `/json/cfg` connected on the very next attempt, in 3 s; four attempts at
 had failed in the preceding minutes. The router hears the board fine either way (RSSI −62),
 so what fails is the board's own transmission at full power when hot — a distorted or
 supply-starved PA, the usual reason a lower setting cures AUTH_EXPIRE on ESP32 boards; which
-of the two it is would take a scope. Two changes: the board build now starts at 11 dBm
+of the two it is would take a scope. Reproduced the same morning under control: rescue AP
+open to heat the chip to 76 °C, then the real network restored at 19.5 dBm — two attempts,
+two `AUTH_EXPIRE` at RSSI −64; power set to 11 dBm, next attempt associated in 3 s. Two
+changes: the board build now starts at 11 dBm
 (`WLED_TX_POWER_DEFAULT=44` in `platformio.ini`; the WiFi settings page can still change
 it), and `network.cpp` steps power down one level after three consecutive authentication or
 handshake timeouts, as far down as 2 dBm if it has to (at RSSI −62 even that has margin),
@@ -93,11 +96,21 @@ so a hot board at any setting finds one that works instead of retrying the same 
 night. A successful connection resets the count; the step lasts until reboot and the
 configured value is untouched. Effective power shows as `wifi.txPower` in `/json/info`.
 
-One observation from that night is still open: the firmware reported the access point as
-open for those ten hours and a phone next to the board saw no `WLED-AP`. The AP beacons with
-the same transmitter at the same power, so the working hypothesis is the same fault — the AP
-*was* up and nothing could decode it — but that is a hypothesis, not a measurement. The
-event log below exists so the next occurrence is not reconstructed from one reason code.
+**The access point that was "open" with nothing on the air — same fault, seen from the
+other side.** For those ten hours the firmware reported the AP open and a phone next to the
+board saw no `WLED-AP`. Scanned from a Mac (CoreWLAN; `system_profiler` redacts SSIDs
+without Location Services) during the reproduction: at 19.5 dBm and 76 °C the AP was
+visible in 10 of 11 scans on channel 6 (and 2 of 2 on channel 1) while the WiFi attempts
+were hitting a network that does not exist. It vanished the moment the attempts targeted
+the real network on channel 11 and failed, and stayed gone through nine scans — `apActive`
+true, no AP-stop event from the driver. ESP-IDF moves a soft-AP to the station's channel on
+a connection attempt, so the AP was now on channel 11, where nothing the hot board sends at
+full power is receivable: the AP's beacons went the way of the authentication frames. One
+second after the automatic step to 11 dBm, `WLED-AP` was back in the scan on channel 11 at
+−51 dBm, and the next attempt connected. A restart of the soft-AP after each failed attempt
+was tried as well and made no visible difference on its own; it was removed. So the one
+fix covers both symptoms, and the netlog records the driver's AP state next to the
+firmware's should they ever disagree for another reason.
 
 **The access point is a rescue path, not a feature.** This hardware is potted. If it ever talks
 itself out of every network there is no USB to fall back on, so the rule is simple and has no
@@ -107,7 +120,7 @@ appearance and nothing else. This has to work *with Ethernet up*
 too, which upstream never considered: every AP decision sat behind "is any interface
 connected", so a PoE-powered board whose WiFi had gone away would never open one, and never
 retry WiFi either. `WLED_AP_RESCUE` (a default build flag here) adds that case — with
-Ethernet up, WiFi is retried 30 s ×3 then every 5 min, never during a realtime stream and
+Ethernet up, WiFi is retried 30 s ×3 then every 2 min, never during a realtime stream and
 never while a phone is on the AP — and refuses any AP behaviour setting weaker than "open
 when no connection". "Always" is still allowed, at the cost of the heat above. One more
 upstream assumption had to go for this to hold: the WiFi disconnect handler treated "any
@@ -255,7 +268,12 @@ GPIO 1):
   watched with no reboot and no core dump.
 - TX power vs. authentication, on the hot board (70 °C): four attempts at 19.5 dBm, each
   `AUTH_EXPIRE`; the first at 11 dBm associated in 3 s and had an IP in 9 s. Half an hour
-  later, connected and sleeping, 56 °C.
+  later, connected and sleeping, 56 °C. Reproduced twice more under control at 76 °C.
+- **The whole recovery chain, unattended**, on the hot board with 19.5 dBm configured:
+  attempts at 60 s, 90 s and 210 s each `AUTH_EXPIRE`; `TX power stepped down to 44`
+  on the third; `WLED-AP` (moved to channel 11 by the driver, invisible at full power)
+  back in the Mac's scan one second later at −51 dBm; next attempt at 330 s associated in
+  3 s, IP 8 s later, AP closed, modem sleep on. Every step in `/netlog`.
 - `/netlog` over WiFi and over Ethernet after the OTA that introduced it: boot reason,
   every attempt, the driver's AP restart as WiFi joined channel 11, `AP closed`,
   `modem sleep on`. After the next OTA the log read `current boot #2` with every boot #1
@@ -264,8 +282,9 @@ GPIO 1):
   `wifi.lastReasonAge`, and `wifi.txPower` = 44.
 
 **Not verified:** DHCP handover (needs a switch with a DHCP server); Art-Net over Ethernet
-under load; the automatic TX step-down (it needs the authentication failure to recur — the
-default is now below the power that failed).
+under load; whether the channel-11 failure also occurs at full power on a *cool* board (it
+connected on channel 11 at full power all the previous day, so presumably not — but it was
+not re-measured once the cause was known).
 
 ## Notes for this rig
 

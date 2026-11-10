@@ -641,24 +641,28 @@ static bool wifiLinkWasUp = false;   // WiFi had an IP; cleared when it drops (s
 // but every attempt ends in AUTH_EXPIRE, because the router cannot decode what the
 // board sends -- a distorted or supply-starved transmitter, the usual reason a lower
 // power setting fixes AUTH_EXPIRE on ESP32 boards. Measured 2026-11-10 after a 10-hour
-// outage: four attempts at 19.5 dBm failed; the first at 11 dBm connected in 3 s.
+// outage, then reproduced twice under control at 76 C: every attempt at 19.5 dBm failed,
+// the first at 11 dBm connected in 3 s. The same fault hid the rescue AP: the driver
+// moves a soft-AP to the station's channel (11) on a connection attempt, and nothing the
+// hot board sends at full power on channel 11 is receivable -- the AP was visible on
+// channels 1 and 6 at the same power and temperature, and on channel 11 at 11 dBm.
 // So after WIFI_TXPOWER_STEPDOWN_AFTER consecutive authentication or handshake
-// timeouts the effective power drops one level, all the way down to 2 dBm if it has to:
-// at RSSI -62 even that has margin, and a connection at any power beats a hot board
-// retrying the same failure all night. A successful connection resets the count. The
-// step persists until reboot (it is an adaptation to this board right now, not a
-// setting); the configured value is untouched and is what the next boot starts from.
-// Each step is recorded in the netlog and shows in /json/info as wifi.txPower.
+// timeouts the effective power drops: first straight to 11 dBm, the level measured to
+// work on the hot board (anything above it is the failure region, and walking down
+// through it 0.5 dB at a time would take hours at the slow retry cadence), then 8.5, 5
+// and 2 dBm if it has to -- at RSSI -62 even that has margin, and a connection at any
+// power beats retrying the same failure all night. A successful connection resets the
+// count. The step persists until reboot (it is an adaptation to this board right now,
+// not a setting); the configured value is untouched and is what the next boot starts
+// from. Each step is recorded in the netlog and shows in /json/info as wifi.txPower.
 static constexpr uint8_t WIFI_TXPOWER_STEPDOWN_AFTER = 3;
 static uint8_t wifiAuthTimeouts = 0;
 
 static uint8_t wifiTxPowerBelow(uint8_t p)
 {
-  static const uint8_t levels[] = { WIFI_POWER_21dBm, WIFI_POWER_19_5dBm, WIFI_POWER_19dBm, WIFI_POWER_18_5dBm,
-                                    WIFI_POWER_17dBm, WIFI_POWER_15dBm, WIFI_POWER_13dBm, WIFI_POWER_11dBm, WIFI_POWER_8_5dBm,
-                                    WIFI_POWER_7dBm, WIFI_POWER_5dBm, WIFI_POWER_2dBm };
+  static const uint8_t levels[] = { WIFI_POWER_11dBm, WIFI_POWER_8_5dBm, WIFI_POWER_5dBm, WIFI_POWER_2dBm };
   for (uint8_t l : levels) if (l < p) return l;
-  return p;   // already at or below the floor
+  return p;   // already at the floor
 }
 
 void wifiStaReasonEvent(arduino_event_id_t event, arduino_event_info_t info)
