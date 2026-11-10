@@ -143,7 +143,7 @@ inlines them and fails loudly if any build-tree path survives.
 
 ## Size
 
-1,690,718 bytes, 89.0% of the 1.9 MB app partition that `esp32s3_w5500_autoip` selects
+1,695,658 bytes, 89.2% of the 1.9 MB app partition that `esp32s3_w5500_autoip` selects
 (with ArduinoOTA, network debug and the `/coredump` endpoint compiled in). That is ~500 kB
 more than the same WLED built against tasmota's framework (1,184,307). **OTA is
 unaffected** — the layout keeps two app slots — but the filesystem drops from 1 MB to 256 kB.

@@ -193,6 +193,7 @@ bool deserializeConfig(JsonObject doc, bool fromFS) {
   #else
     txPower = min(max((int)txPower, (int)WIFI_POWER_2dBm), (int)WIFI_POWER_19_5dBm);
   #endif
+  txPowerEffective = txPower;
 #endif
 
   JsonObject hw = doc[F("hw")];

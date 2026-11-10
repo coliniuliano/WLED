@@ -635,13 +635,50 @@ static bool wifiLinkWasUp = false;   // WiFi had an IP; cleared when it drops (s
 // or out of range), 2 AUTH_EXPIRE / 15 4WAY_HANDSHAKE_TIMEOUT / 204 HANDSHAKE_TIMEOUT
 // (visible but authentication failed -- wrong key or a link too weak to finish),
 // 8 ASSOC_LEAVE (we or the AP deliberately deauthenticated), 205 CONNECTION_FAIL.
+//
+// Transmit power step-down. On this board the radio at full power (19.5 dBm) stops being
+// able to authenticate once the chip is hot: the router hears the board well (RSSI -62)
+// but every attempt ends in AUTH_EXPIRE, because the router cannot decode what the
+// board sends -- a distorted or supply-starved transmitter, the usual reason a lower
+// power setting fixes AUTH_EXPIRE on ESP32 boards. Measured 2026-11-10 after a 10-hour
+// outage: four attempts at 19.5 dBm failed; the first at 11 dBm connected in 3 s.
+// So after WIFI_TXPOWER_STEPDOWN_AFTER consecutive authentication or handshake
+// timeouts the effective power drops one level, all the way down to 2 dBm if it has to:
+// at RSSI -62 even that has margin, and a connection at any power beats a hot board
+// retrying the same failure all night. A successful connection resets the count. The
+// step persists until reboot (it is an adaptation to this board right now, not a
+// setting); the configured value is untouched and is what the next boot starts from.
+// Each step is recorded in the netlog and shows in /json/info as wifi.txPower.
+static constexpr uint8_t WIFI_TXPOWER_STEPDOWN_AFTER = 3;
+static uint8_t wifiAuthTimeouts = 0;
+
+static uint8_t wifiTxPowerBelow(uint8_t p)
+{
+  static const uint8_t levels[] = { WIFI_POWER_21dBm, WIFI_POWER_19_5dBm, WIFI_POWER_19dBm, WIFI_POWER_18_5dBm,
+                                    WIFI_POWER_17dBm, WIFI_POWER_15dBm, WIFI_POWER_13dBm, WIFI_POWER_11dBm, WIFI_POWER_8_5dBm,
+                                    WIFI_POWER_7dBm, WIFI_POWER_5dBm, WIFI_POWER_2dBm };
+  for (uint8_t l : levels) if (l < p) return l;
+  return p;   // already at or below the floor
+}
+
 void wifiStaReasonEvent(arduino_event_id_t event, arduino_event_info_t info)
 {
   if (event != ARDUINO_EVENT_WIFI_STA_DISCONNECTED) return;
-  DEBUG_PRINTF_P(PSTR("WiFi-E: STA disconnected, reason %u, rssi %d @ %lus\n"),
-                 (unsigned)info.wifi_sta_disconnected.reason,
-                 (int)info.wifi_sta_disconnected.rssi,
-                 millis()/1000);
+  const uint8_t reason = info.wifi_sta_disconnected.reason;
+  const int8_t  rssi   = info.wifi_sta_disconnected.rssi;
+  DEBUG_PRINTF_P(PSTR("WiFi-E: STA disconnected, reason %u, rssi %d @ %lus\n"), (unsigned)reason, (int)rssi, millis()/1000);
+  netlogAdd(NL_STA_DISCONNECTED, reason, rssi);
+
+  const bool authTimeout = reason == WIFI_REASON_AUTH_EXPIRE || reason == WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT || reason == WIFI_REASON_HANDSHAKE_TIMEOUT;
+  if (!authTimeout) return;   // NO_AP_FOUND, a deliberate leave etc. say nothing about our transmitter
+  if (++wifiAuthTimeouts < WIFI_TXPOWER_STEPDOWN_AFTER) return;
+  wifiAuthTimeouts = 0;
+  const uint8_t lower = wifiTxPowerBelow(txPowerEffective);
+  if (lower == txPowerEffective) return;
+  txPowerEffective = lower;
+  WiFi.setTxPower(wifi_power_t(lower));   // initConnection() applies it again on the next attempt
+  netlogAdd(NL_TX_POWER, lower);
+  DEBUG_PRINTF_P(PSTR("WiFi: repeated authentication timeouts, TX power stepped down to %u.\n"), (unsigned)lower);
 }
 #endif
 // AI: end
@@ -652,21 +689,26 @@ void WiFiEvent(WiFiEvent_t event)
     case ARDUINO_EVENT_WIFI_AP_STADISCONNECTED:
       // AP client disconnected
       if (apClients > 0) apClients--;
+      netlogAdd(NL_AP_CLIENT_DISCONNECTED, apClients);
       if (apClients == 0 && isWiFiConfigured()) forceReconnect = true; // no clients reconnect WiFi if available
       DEBUG_PRINTF_P(PSTR("WiFi-E: AP Client Disconnected (%d) @ %lus.\n"), (int)apClients, millis()/1000);
       break;
     case ARDUINO_EVENT_WIFI_AP_STACONNECTED:
       // AP client connected
       apClients++;
+      netlogAdd(NL_AP_CLIENT_CONNECTED, apClients);
       DEBUG_PRINTF_P(PSTR("WiFi-E: AP Client Connected (%d) @ %lus.\n"), (int)apClients, millis()/1000);
       break;
     case ARDUINO_EVENT_WIFI_STA_GOT_IP:
       DEBUG_PRINT(F("WiFi-E: WiFi IP address: ")); DEBUG_PRINTLN(WLEDNetwork.wifiIP());
       wifiLinkWasUp = true;
+      wifiAuthTimeouts = 0;
+      netlogAdd(NL_STA_GOT_IP, WLEDNetwork.wifiIP()[3]);
       break;
     case ARDUINO_EVENT_WIFI_STA_CONNECTED:
       // followed by IDLE and SCAN_DONE
       DEBUG_PRINTF_P(PSTR("WiFi-E: Connected! @ %lus\n"), millis()/1000);
+      netlogAdd(NL_STA_CONNECTED);
       wasConnected = true;
       break;
     case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
@@ -702,22 +744,27 @@ void WiFiEvent(WiFiEvent_t event)
       break;
     case ARDUINO_EVENT_WIFI_STA_START:
       DEBUG_PRINTLN(F("WiFi-E: STA Started"));
+      netlogAdd(NL_STA_START);
       break;
     case ARDUINO_EVENT_WIFI_STA_STOP:
       DEBUG_PRINTLN(F("WiFi-E: STA Stopped"));
+      netlogAdd(NL_STA_STOP);
       break;
     case ARDUINO_EVENT_WIFI_STA_AUTHMODE_CHANGE:
       DEBUG_PRINTLN(F("WiFi-E: STA authentication mode change."));
       break;
     case ARDUINO_EVENT_WIFI_STA_LOST_IP:
       DEBUG_PRINTLN(F("WiFi-E: IP address lost."));
+      netlogAdd(NL_STA_LOST_IP);
       break;
 
     case ARDUINO_EVENT_WIFI_AP_START:
       DEBUG_PRINTLN(F("WiFi-E: AP Started"));
+      netlogAdd(NL_AP_START, apActive);
       break;
     case ARDUINO_EVENT_WIFI_AP_STOP:
       DEBUG_PRINTLN(F("WiFi-E: AP Stopped"));
+      netlogAdd(NL_AP_STOP, apActive);   // 1 here = the driver closed an AP the firmware still counts on
       break;
     #if defined(WLED_USE_ETHERNET)
     case ARDUINO_EVENT_ETH_START:
@@ -726,6 +773,7 @@ void WiFiEvent(WiFiEvent_t event)
     case ARDUINO_EVENT_ETH_CONNECTED:
       {
       DEBUG_PRINTLN(F("ETH-E: Connected"));
+      netlogAdd(NL_ETH_CONNECTED);
       // WiFi is deliberately left running: both interfaces serve traffic
       // simultaneously on this build. See WLEDNetwork's per-interface accessors.
       //
@@ -743,9 +791,11 @@ void WiFiEvent(WiFiEvent_t event)
     case ARDUINO_EVENT_ETH_GOT_IP:
       DEBUG_PRINT(F("ETH-E: IP address: ")); DEBUG_PRINTLN(WLEDNetwork.ethernetIP());
       ethernetLinkLocalAssigned = (ETH.localIP()[0] == 169 && ETH.localIP()[1] == 254);
+      netlogAdd(NL_ETH_GOT_IP, ETH.localIP()[3], ethernetLinkLocalAssigned);
       break;
     case ARDUINO_EVENT_ETH_DISCONNECTED:
       DEBUG_PRINTLN(F("ETH-E: Disconnected"));
+      netlogAdd(NL_ETH_DISCONNECTED);
       ethernetLinkLocalAssigned = false; // re-applied on the next ETH_CONNECTED
       // This doesn't really affect ethernet per se,
       // as it's only configured once.  Rather, it

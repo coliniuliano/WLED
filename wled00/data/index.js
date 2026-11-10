@@ -723,6 +723,9 @@ ${i.opt&0x100?inforow("Debug","<button class=\"btn btn-xs\" onclick=\"requestJso
 ${inforow("Build",i.vid)}
 ${inforow("Signal strength",i.wifi.signal +"% ("+ i.wifi.rssi, " dBm)")}
 ${i.wifi.band?inforow("WiFi band",i.wifi.band + " (Ch " + i.wifi.channel + ")"):""}
+${i.wifi_ip?inforow("WiFi IP",i.wifi_ip):""}
+${i.eth_ip?inforow("Ethernet IP",i.eth_ip):""}
+${i.wifi.lastReason!==undefined?inforow("Last WiFi drop","reason "+i.wifi.lastReason+(i.wifi.lastReasonName?" ("+i.wifi.lastReasonName+")":"")+", "+getRuntimeStr(i.wifi.lastReasonAge)+" ago"):""}
 ${inforow("Uptime",getRuntimeStr(i.uptime))}
 ${inforow("Time",i.time)}
 ${inforow("Free heap",(i.freeheap/1024).toFixed(1)," kB")}

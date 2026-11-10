@@ -63,14 +63,41 @@ the 30 s debug report.
 **The radio is the heat.** Measured in free air, LEDs and Ethernet unplugged, same board, same
 spot: 78 °C with the access point on and the WiFi radio never sleeping; 76 °C with the AP
 closed; **55 °C once the WiFi radio was allowed to modem-sleep**; and still 55 °C with TX power
-cut from 19.5 dBm to 11 dBm on top — transmit duty cycle is ~1 %, so TX power is left at the
-default for link margin. A soft-AP must beacon, so ESP-IDF cannot power-save while one is
-up — which is why the AP is no longer left on permanently. Modem sleep costs latency on
+cut from 19.5 dBm to 11 dBm on top — transmit duty cycle is ~1 %, so power does not show up as
+heat (it is lowered anyway, for the reason in the next paragraph). A soft-AP must beacon, so
+ESP-IDF cannot power-save while one is up — which is why the AP is no longer left on
+permanently. Modem sleep costs latency on
 *incoming* traffic (ping averaged 180 ms against the router's DTIM period; HTTP stayed at
 40 ms). That is fine for the web UI, and realtime data arrives over Ethernet on this rig, so
 sleep is simply on whenever the AP is closed. The "Disable WiFi sleep" setting still wins if
 ticked; it is an ordinary WiFi setting, not a build flag, and the deployed config has sleep
 enabled.
+
+**Full transmit power stops working once the chip is hot.** The board dropped off WiFi at
+22:16 one night and was still off at 08:30, ten hours later, with no reboot in between
+(the uptime said so) and nothing wrong with the radio — a scan from the board listed the
+router at −61 dBm. Every connection attempt ended the same way: `reason 2 AUTH_EXPIRE` four
+seconds after `Connecting`, the router never answering the authentication. The router's own
+log showed the board's last association at 22:10 and nothing until the fix. The chip sat at
+70 °C the whole time, because a board without WiFi has its AP open and cannot sleep — which
+is also why the condition is self-sustaining. Lowering TX power from 19.5 dBm to 11 dBm
+through `/json/cfg` connected on the very next attempt, in 3 s; four attempts at full power
+had failed in the preceding minutes. The router hears the board fine either way (RSSI −62),
+so what fails is the board's own transmission at full power when hot — a distorted or
+supply-starved PA, the usual reason a lower setting cures AUTH_EXPIRE on ESP32 boards; which
+of the two it is would take a scope. Two changes: the board build now starts at 11 dBm
+(`WLED_TX_POWER_DEFAULT=44` in `platformio.ini`; the WiFi settings page can still change
+it), and `network.cpp` steps power down one level after three consecutive authentication or
+handshake timeouts, as far down as 2 dBm if it has to (at RSSI −62 even that has margin),
+so a hot board at any setting finds one that works instead of retrying the same failure all
+night. A successful connection resets the count; the step lasts until reboot and the
+configured value is untouched. Effective power shows as `wifi.txPower` in `/json/info`.
+
+One observation from that night is still open: the firmware reported the access point as
+open for those ten hours and a phone next to the board saw no `WLED-AP`. The AP beacons with
+the same transmitter at the same power, so the working hypothesis is the same fault — the AP
+*was* up and nothing could decode it — but that is a hypothesis, not a measurement. The
+event log below exists so the next occurrence is not reconstructed from one reason code.
 
 **The access point is a rescue path, not a feature.** This hardware is potted. If it ever talks
 itself out of every network there is no USB to fall back on, so the rule is simple and has no
@@ -111,9 +138,15 @@ and `/json/cfg`. Logs: `DEBUG` output goes to UDP, and the destination is now a 
 broadcast default never leaves the local segment and the person debugging usually is not on
 it. Crashes: `GET /coredump` streams the ELF core dump the panic handler leaves in flash
 (`esp-coredump info_corefile -t elf -c coredump.elf firmware.elf`), `/coredump?erase` clears
-it, and `/json/info` reports `coredump: true` when one is waiting. The WiFi disconnect reason
-code is logged too, because the stock event handler says nothing at all for a WiFi
-connection that never comes up.
+it, and `/json/info` reports `coredump: true` when one is waiting. Network history:
+`GET /netlog` lists the last 96 WiFi, AP and Ethernet events — every connection attempt,
+every disconnect with its reason code and RSSI, every AP open/close as the firmware decided
+it *and* as the driver reported it, TX power steps, sleep changes, and the reset reason of
+each boot — kept in RTC memory so it survives a software reset, panic or watchdog (not a
+power cycle). The Info panel shows the most recent WiFi drop with its reason and age, and
+the WiFi and Ethernet addresses separately. The stock event handler said nothing at all for
+a WiFi connection that never came up; the ten-hour outage above was diagnosed from a single
+reason code caught live, which is what this replaces.
 
 **`net_debug` builds on Ethernet.** Its host lookup called `ETH.hostByName()`, which does not
 exist on `ETHClass` in arduino-esp32 3.x, so the Ethernet branch had never compiled — nothing
@@ -172,6 +205,14 @@ work on this board without them.
   nc -l -u 7868
   ```
 
+- **`/netlog`** needs no listener at all: it is the board's own record of what the network
+  did, readable after the fact over whichever interface still answers.
+
+  ```bash
+  curl http://<ip>/netlog           # oldest first; earlier boots included after a soft reset
+  curl http://<ip>/netlog?clear
+  ```
+
 What stays local, in gitignored `platformio_override.ini`, is only the per-deployment upload
 target:
 
@@ -212,9 +253,19 @@ GPIO 1):
 - The lwIP fix at runtime: NTP enabled over WiFi, which runs the exact `dns_gethostbyname()`
   call that used to assert — `NTP IP resolved`, time synced 23 s after boot, five minutes
   watched with no reboot and no core dump.
+- TX power vs. authentication, on the hot board (70 °C): four attempts at 19.5 dBm, each
+  `AUTH_EXPIRE`; the first at 11 dBm associated in 3 s and had an IP in 9 s. Half an hour
+  later, connected and sleeping, 56 °C.
+- `/netlog` over WiFi and over Ethernet after the OTA that introduced it: boot reason,
+  every attempt, the driver's AP restart as WiFi joined channel 11, `AP closed`,
+  `modem sleep on`. After the next OTA the log read `current boot #2` with every boot #1
+  entry still there, ending in the `ASSOC_LEAVE` of the OTA reboot — RTC persistence works.
+  `/json/info` carries `wifi_ip`, `eth_ip`, `wifi.lastReason`, `wifi.lastReasonName`,
+  `wifi.lastReasonAge`, and `wifi.txPower` = 44.
 
 **Not verified:** DHCP handover (needs a switch with a DHCP server); Art-Net over Ethernet
-under load.
+under load; the automatic TX step-down (it needs the authentication failure to recur — the
+default is now below the power that failed).
 
 ## Notes for this rig
 
@@ -223,7 +274,7 @@ no DHCP wait, no RFC 3927 conflict probing, same address every power cycle. Link
 takes ~5–9 s, most of which is mandatory ARP probing.
 
 **Deployed WiFi settings:** AP behaviour "open when no connection", WiFi sleep enabled, TX
-power at the default. A config wipe returns sleep to WLED's default (off) — hot but safe;
+power 11 dBm (`txpwr` 44, also the build default). A config wipe returns sleep to WLED's default (off) — hot but safe;
 the AP behaviour floor is compiled in and survives. A further lever, not taken: the CPU runs
 at 240 MHz and 160 MHz would shave a few more degrees, but it touches LED timing and 29
 pixels do not need it.

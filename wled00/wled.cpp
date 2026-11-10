@@ -492,6 +492,7 @@ static void applyWiFiPowerSave(bool force = false)
   if (!force && (int8_t)wantSleep == applied) return;
   applied = wantSleep;
   DEBUG_PRINTF_P(PSTR("WiFi sleep %s%s.\n"), wantSleep ? "enabled" : "disabled", apActive ? " (AP open)" : "");
+  netlogAdd(NL_SLEEP, wantSleep);
   WiFi.setSleep(wantSleep);
 }
 #endif
@@ -502,6 +503,8 @@ void WLED::setup()
   #if defined(ARDUINO_ARCH_ESP32) && defined(WLED_DISABLE_BROWNOUT_DET)
   WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0); //disable brownout detection
   #endif
+
+  netlogInit();   // before anything that can raise a network event
 
   #ifdef ARDUINO_ARCH_ESP32
   gpio_pulldown_en((gpio_num_t)hardwareRX); delay(1); // suppress noise in case RX pin is floating (at low noise energy) - see issue #3128
@@ -860,11 +863,12 @@ void WLED::initAP(bool resetAP)
   #endif
   #endif
 
+  netlogAdd(NL_AP_OPEN, apChannel);
   WiFi.softAPConfig(IPAddress(4, 3, 2, 1), IPAddress(4, 3, 2, 1), IPAddress(255, 255, 255, 0));
   WiFi.softAP(apSSID, apPass, apChannel, apHide);
   #ifdef ARDUINO_ARCH_ESP32
-  DEBUG_PRINT(F("access point maxTxPower set to ")); DEBUG_PRINTLN(txPower);
-  WiFi.setTxPower(wifi_power_t(txPower));
+  DEBUG_PRINT(F("access point maxTxPower set to ")); DEBUG_PRINTLN(txPowerEffective);
+  WiFi.setTxPower(wifi_power_t(txPowerEffective));
   #endif
 
   if (!apActive) // start captive portal if AP active
@@ -892,6 +896,7 @@ void WLED::initAP(bool resetAP)
 void WLED::initConnection()
 {
   DEBUG_PRINTF_P(PSTR("initConnection() called @ %lus.\n"), millis()/1000);
+  netlogAdd(NL_INIT_CONNECTION, apActive);
   #ifdef WLED_ENABLE_WEBSOCKETS
   ws.onEvent(wsEvent);
   #endif
@@ -1033,8 +1038,8 @@ void WLED::initConnection()
 #endif // WLED_ENABLE_WPA_ENTERPRISE
 
 #ifdef ARDUINO_ARCH_ESP32
-    DEBUG_PRINT(F("WiFi maxTxPower set to ")); DEBUG_PRINTLN(txPower);
-    WiFi.setTxPower(wifi_power_t(txPower));
+    DEBUG_PRINT(F("WiFi maxTxPower set to ")); DEBUG_PRINTLN(txPowerEffective);
+    WiFi.setTxPower(wifi_power_t(txPowerEffective));
     applyWiFiPowerSave(true);   // sleep is a policy, not a flag: see applyWiFiPowerSave()
 #else // ESP8266 accepts a hostname set after WiFi interface initialization
     DEBUG_PRINT(F("WiFi sleep ")); DEBUG_PRINTLN(noWifiSleep ? F("disabled."):F("enabled."));
@@ -1322,9 +1327,10 @@ void WLED::handleConnection()
 #else
     if (apBehavior != AP_BEHAVIOR_ALWAYS && apActive) {
 #endif
+      apActive = false;   // before the driver call, so its AP-stop event is logged as requested
+      netlogAdd(NL_AP_CLOSE);
       dnsServer.stop();
       WiFi.softAPdisconnect(true);
-      apActive = false;
       DEBUG_PRINTLN(F("Access point disabled (connected)."));
     }
   }
