@@ -725,7 +725,8 @@ ${inforow("Signal strength",i.wifi.signal +"% ("+ i.wifi.rssi, " dBm)")}
 ${i.wifi.band?inforow("WiFi band",i.wifi.band + " (Ch " + i.wifi.channel + ")"):""}
 ${i.wifi_ip?inforow("WiFi IP",i.wifi_ip):""}
 ${i.eth_ip?inforow("Ethernet IP",i.eth_ip):""}
-${i.wifi.lastReason!==undefined?inforow("Last WiFi drop","reason "+i.wifi.lastReason+(i.wifi.lastReasonName?" ("+i.wifi.lastReasonName+")":"")+", "+getRuntimeStr(i.wifi.lastReasonAge)+" ago"):""}
+${inforow("Access point",(i.wifi.ap?"open":"closed"+(i.wifi.apWindow?" ("+Math.round(i.wifi.apWindow/60)+" min)":""))+" <button class=\"btn btn-xs\" title=\""+(i.wifi.ap?"Close":"Open")+"\" onclick=\"requestJson({wifi:{ap:"+(i.wifi.ap?"false":"true")+"}});setTimeout(requestJson,1500);\"><i class=\"icons "+(i.wifi.ap?"on":"off")+"\">&#xe08f;</i></button>")}
+${i.wifi.lastReason!==undefined?inforow("Last WiFi drop",(i.wifi.lastReasonName||"reason")+" ("+i.wifi.lastReason+"), "+getRuntimeStr(i.wifi.lastReasonAge)+" ago"):""}
 ${inforow("Uptime",getRuntimeStr(i.uptime))}
 ${inforow("Time",i.time)}
 ${inforow("Free heap",(i.freeheap/1024).toFixed(1)," kB")}

@@ -104,6 +104,8 @@ void rescueNetworkRequestAp(bool open)
   requestPending = true; requestOpen = open;
 }
 
+unsigned rescueNetworkApWindowSeconds() { return AP_WINDOW_MS / 1000; }
+
 void rescueNetworkHandle(unsigned long now, uint8_t apClients)
 {
   const bool wifiUp         = WLEDNetwork.isWiFiUp();

@@ -7,6 +7,7 @@
 // rescue_network.cpp for the rules. Everything here runs on the loop task.
 #ifdef WLED_AP_RESCUE
 void rescueNetworkHandle(unsigned long now, uint8_t apClients);   // from handleConnection(), every loop
-void rescueNetworkRequestAp(bool open);                            // {"wifi":{"ap":true|false}} on /json/state
+void rescueNetworkRequestAp(bool open);                            // {"wifi":{"ap":true|false}} on /json/state, and the Info panel button
+unsigned rescueNetworkApWindowSeconds();                           // for the UI: how long an on-demand AP stays open
 #endif
 // AI: end

@@ -127,7 +127,8 @@ as four rules applied every loop from the current facts:
    bench, not a venue.
 
 `{"wifi":{"ap":true}}` on `/json/state` (WLED's existing key) opens a 5-minute window on
-demand (over Ethernet, to hand a phone a path); `{"wifi":{"ap":false}}` closes it. "AP always" in the WiFi settings is honoured as a
+demand (over Ethernet, to hand a phone a path); `{"wifi":{"ap":false}}` closes it. The Info
+panel has the same as a button — "Access point: closed [Open 5 min]". "AP always" in the WiFi settings is honoured as a
 permanent rule 4; any weaker AP behaviour is refused (`WLED_AP_RESCUE`, a default build flag
 here). Every open and close is a netlog entry with its reason. This is the shape ESPHome
 (`ap_timeout`), Tasmota's WiFi manager and WLED's own "Temporary" behaviour converge on; the
