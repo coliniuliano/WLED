@@ -8,6 +8,12 @@ device is unreachable. There is no way to get an address.
 
 ## What was done
 
+> **Update, 2026-11-11:** piece 1 below, WLED's own fallback, has been removed
+> (`applyEthernetLinkLocal()` and the DHCP-timeout state machine). Link-local addressing is
+> now lwIP AUTOIP only, in `wled00/eth_addressing.cpp`. On a stock framework an interface
+> with no DHCP server and no static address stays unaddressed. What follows about piece 1
+> is history.
+
 Two independent pieces, in two commits.
 
 **1. WLED self-assigns a link-local address.** If no static IP is configured and DHCP goes

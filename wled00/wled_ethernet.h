@@ -46,7 +46,7 @@ typedef struct EthernetSettings {
 } ethernet_settings;
 
 // Indexed by ethernetType. Describes RMII boards only -- SPI types are numbered
-// past the end of this table, so check isSpiEthernet() before indexing it.
+// past the end of this table, so check isRmiiEthernet() before indexing it.
 extern const ethernet_settings ethernetBoards[];
 
 #define WLED_ETH_RSVD_PINS_COUNT 6
@@ -94,11 +94,21 @@ extern const managed_pin_type esp32_spi_ethernet_pins[WLED_ETH_SPI_PINS_COUNT];
 
 #endif // WLED_ETH_HAS_SPI
 
-// True for ethernet types that are SPI-attached rather than RMII. Callers must
-// check this before indexing ethernetBoards[], which only describes RMII boards.
+// True for ethernet types that are SPI-attached and that this build can drive.
 inline bool isSpiEthernet(int type) {
 #ifdef WLED_ETH_HAS_SPI
   return type == WLED_ETH_W5500;
+#else
+  return false;
+#endif
+}
+
+// True for ethernet types that ethernetBoards[] describes and that this build can drive.
+// Check it before indexing the table: SPI types are numbered past its end, and one can be
+// selected on a build that has no SPI driver.
+inline bool isRmiiEthernet(int type) {
+#ifdef WLED_ETH_HAS_RMII
+  return type > WLED_ETH_NONE && type < (WLED_NUM_ETH_TYPES - WLED_NUM_ETH_SPI_TYPES);
 #else
   return false;
 #endif

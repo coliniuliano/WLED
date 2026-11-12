@@ -1,7 +1,7 @@
 # Building an ESP32-S3 framework with `CONFIG_LWIP_AUTOIP`
 
-WLED's Ethernet code self-assigns an RFC 3927 link-local address when no DHCP server
-answers. lwIP can do that itself, and do it better — holding a link-local address *while*
+On a segment with no DHCP server, WLED's Ethernet interface needs an RFC 3927 link-local
+address to be reachable. lwIP can assign one itself — holding a link-local address *while*
 the DHCP client keeps discovering, then switching cleanly to a lease — but only if the
 framework was built with `CONFIG_LWIP_AUTOIP=y`, which no stock ESP32 Arduino framework is.
 

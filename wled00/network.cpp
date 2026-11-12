@@ -1,9 +1,6 @@
 #include "wled.h"
 #include "fcn_declare.h"
 #include "wled_ethernet.h"
-#if defined(ARDUINO_ARCH_ESP32) && defined(WLED_USE_ETHERNET)
-#include "esp_mac.h"   // esp_read_mac()/ESP_MAC_ETH, for the link-local host part
-#endif
 
 
 #if defined(ARDUINO_ARCH_ESP32) && defined(WLED_USE_ETHERNET)
@@ -209,148 +206,6 @@ static_assert((sizeof(ethernetBoards)/sizeof(ethernetBoards[0])) == (WLED_NUM_ET
   static_assert(((WLED_ETH_DEFAULT) >= WLED_ETH_NONE) && ((WLED_ETH_DEFAULT) < WLED_NUM_ETH_TYPES), "WLED_ETH_DEFAULT is out of range.");
 #endif
 
-// Assign an RFC 3927 link-local (APIPA) address to the Ethernet interface.
-//
-// This exists because a netif cannot hold a static address while the DHCP client
-// is probing -- starting the client zeroes the address -- so on a segment with no
-// DHCP server the interface would sit at 0.0.0.0 for the full lease timeout. lwIP's
-// own AUTOIP would handle this properly, but CONFIG_LWIP_AUTOIP is not enabled in the
-// stock prebuilt libraries, so derive the address here instead. On a framework built
-// with it, WLED_ETH_LWIP_AUTOIP is set and this path is not used.
-//
-// The host part comes from the MAC so the address is stable across reboots and
-// unique between boards on the same segment.
-void applyEthernetLinkLocal()
-{
-  // Read from efuse rather than ETH.macAddress(): this runs from initEthernet(),
-  // which is called during config load, before the interface has started and can
-  // report its own MAC. ESP_MAC_ETH is what the driver programs into the W5500
-  // anyway, so the result is identical and available much earlier.
-  uint8_t mac[6] = {0};
-  if (esp_read_mac(mac, ESP_MAC_ETH) != ESP_OK) WLEDNetwork.localMAC(mac);
-  uint8_t third  = mac[4];
-  uint8_t fourth = mac[5];
-  if (third  == 0 || third  == 255) third  = 1; // 169.254.0.x and 169.254.255.x are reserved
-  if (fourth == 0 || fourth == 255) fourth = 1; // avoid network and broadcast addresses
-
-  // No gateway: an RFC 3927 link-local segment has no router by definition, and
-  // inventing one only makes off-subnet traffic ARP for a host that is not there.
-  // Nothing reads it either -- the broadcast address is derived from the interface
-  // address and mask, not the gateway.
-  IPAddress ip(169, 254, third, fourth);
-  ETH.config(ip, INADDR_NONE, IPAddress(255, 255, 0, 0));
-  ethernetLinkLocalAssigned = true;
-
-  DEBUG_PRINT(F("initE: link-local IP: ")); DEBUG_PRINTLN(ip);
-}
-
-// Addressing state, private to this file.
-//   IDLE    - link down, or nothing applied yet
-//   PROBING - DHCP client running, waiting for a lease before falling back
-//   SETTLED - we have an address (leased, static or link-local); nothing left to do
-enum EthAddrState : uint8_t { ETH_ADDR_IDLE, ETH_ADDR_PROBING, ETH_ADDR_SETTLED };
-static EthAddrState ethAddrState = ETH_ADDR_IDLE;
-static unsigned long ethDhcpStartedAt = 0;
-
-// True when lwIP itself can do RFC 3927, which only happens in a framework built with
-// CONFIG_LWIP_AUTOIP. ESP-IDF's lwipopts.h then also hardcodes LWIP_DHCP_AUTOIP_COOP,
-// so the DHCP client keeps discovering while a link-local address is held and hands
-// over cleanly when a lease arrives -- strictly better than the fallback below, which
-// has to stop DHCP to install an address. Detected, not assumed: the same source
-// builds correctly either way.
-#if defined(CONFIG_LWIP_AUTOIP)
-  #define WLED_ETH_LWIP_AUTOIP 1
-#else
-  #define WLED_ETH_LWIP_AUTOIP 0
-#endif
-
-static void startEthernetDhcp()
-{
-  DEBUG_PRINTLN(F("initE: starting DHCP"));
-  ETH.config(INADDR_NONE, INADDR_NONE, INADDR_NONE);
-  ethernetLinkLocalAssigned = false;
-  ethDhcpStartedAt = millis();
-  // With lwIP AUTOIP there is nothing for us to time out: lwIP self-assigns after
-  // CONFIG_LWIP_AUTOIP_TRIES discovers and keeps the DHCP client running regardless.
-  ethAddrState = WLED_ETH_LWIP_AUTOIP ? ETH_ADDR_SETTLED : ETH_ADDR_PROBING;
-}
-
-// Give the Ethernet interface its address. Called from initEthernet() at boot, from
-// handleEthernetAddressing() when the link comes up, and when the addressing settings
-// change. Deliberately not called from the ETH_CONNECTED event: config() is not
-// idempotent, so a second caller would restart the DHCP client.
-void applyEthernetConfig()
-{
-  // A dedicated Ethernet static IP takes priority over everything else.
-  // NB: compare through uint32_t, never against a literal 0. IPAddress on
-  // arduino-esp32 3.x dropped operator==(uint32_t); a zero constant then binds to
-  // operator==(const uint8_t*), which memcmp()s from address 0 and panics. It
-  // compiles silently -- this crashed every boot before it was caught.
-  if (uint32_t(ethernetStaticIP) != 0U) {
-    DEBUG_PRINTLN(F("initE: using Ethernet static IP"));
-    ETH.config(ethernetStaticIP, ethernetStaticGW, ethernetStaticSN, dnsAddress);
-    ethernetLinkLocalAssigned = false;
-    ethAddrState = ETH_ADDR_SETTLED;
-    return;
-  }
-
-  // Backwards compatibility: WiFi slot 0's static IP used to be shared with Ethernet.
-  // See https://github.com/wled/WLED/issues/5247
-  if (multiWiFi.size() && multiWiFi[0].staticIP != IPAddress() && multiWiFi[0].staticGW != IPAddress()) {
-    DEBUG_PRINTLN(F("initE: using WiFi slot 0 static IP"));
-    ETH.config(multiWiFi[0].staticIP, multiWiFi[0].staticGW, multiWiFi[0].staticSN, dnsAddress);
-    ethernetLinkLocalAssigned = false;
-    ethAddrState = ETH_ADDR_SETTLED;
-    return;
-  }
-
-  // No static address: ask for DHCP. On a framework built with CONFIG_LWIP_AUTOIP, lwIP
-  // self-assigns an RFC 3927 address after CONFIG_LWIP_AUTOIP_TRIES discovers and keeps
-  // the DHCP client running, handing over cleanly if a server later answers. Without it,
-  // handleEthernetAddressing() does a cruder version of the same thing.
-  startEthernetDhcp();
-}
-
-// Drives the DHCP -> link-local fallback, and doubles as a safety net for a missed
-// ETH_CONNECTED event: initEthernet() runs from deserializeConfig(), well before
-// WiFi.onEvent() is registered in setup(), so on a cold boot with the cable already
-// connected the link can come up and the event fire with nothing listening. esp_netif
-// still brings the netif up, so everything looks healthy while the interface has no
-// address at all.
-//
-// Must be cheap and must NOT re-apply configuration on every call. NetworkInterface::
-// config() is not idempotent -- with INADDR_NONE it does dhcpc_stop() then
-// dhcpc_start(), a full restart that resets lwIP's discover counter. Calling it in a
-// loop would keep DHCP permanently in its first attempt and, on an AUTOIP build, stop
-// lwIP ever reaching CONFIG_LWIP_AUTOIP_TRIES.
-void handleEthernetAddressing()
-{
-  if (!ETH.linkUp()) {
-    ethAddrState = ETH_ADDR_IDLE;   // re-apply when the link returns
-    return;
-  }
-
-  if (ethAddrState == ETH_ADDR_IDLE) {
-    DEBUG_PRINTLN(F("initE: link up without configuration, applying"));
-    applyEthernetConfig();
-    return;
-  }
-
-  if (ethAddrState != ETH_ADDR_PROBING) return;
-
-  if (ETH.localIP()[0] != 0) {
-    DEBUG_PRINT(F("initE: DHCP lease: ")); DEBUG_PRINTLN(ETH.localIP());
-    ethAddrState = ETH_ADDR_SETTLED;
-    return;
-  }
-
-  if (millis() - ethDhcpStartedAt > WLED_ETH_DHCP_TIMEOUT) {
-    DEBUG_PRINTLN(F("initE: no DHCP lease, falling back to link-local"));
-    applyEthernetLinkLocal();       // stops the DHCP client as a side effect
-    ethAddrState = ETH_ADDR_SETTLED;
-  }
-}
-
 bool initEthernet()
 {
   static bool successfullyConfiguredEthernet = false;
@@ -394,6 +249,10 @@ bool initEthernet()
 #endif
 
 #ifdef WLED_ETH_HAS_RMII
+  if (!isRmiiEthernet(ethernetType)) {   // an SPI type on a build without the SPI driver: ethernetBoards[] has no entry for it
+    DEBUG_PRINTLN(F("initE: no driver for this ethernet type"));
+    return false;
+  }
 
   // Ethernet initialization should only succeed once -- else reboot required
   ethernet_settings es = ethernetBoards[ethernetType];
@@ -622,76 +481,8 @@ void installIPv6RABlocker() {
 // Runtime state private to this file - previously WLED_GLOBAL, a leftover from
 // when all state lived in one big extern block regardless of who used it.
 static byte apClients = 0;
-static bool wifiLinkWasUp = false;   // WiFi had an IP; cleared when it drops (see STA_DISCONNECTED)
 
 //handle Ethernet connection event
-// AI: below section was generated by an AI
-#ifdef ARDUINO_ARCH_ESP32
-// WiFiEvent() below takes no arduino_event_info_t, so it cannot report *why* the WiFi
-// connection dropped, and its own log line is gated on wasConnected -- meaning a
-// connection that never comes up in the first place says nothing at all. On hardware that
-// will be potted, an undiagnosable WiFi failure is unacceptable, so log the raw reason
-// code ungated. Values are wifi_err_reason_t: 201 NO_AP_FOUND (SSID not visible -- wrong band
-// or out of range), 2 AUTH_EXPIRE / 15 4WAY_HANDSHAKE_TIMEOUT / 204 HANDSHAKE_TIMEOUT
-// (visible but authentication failed -- wrong key or a link too weak to finish),
-// 8 ASSOC_LEAVE (we or the AP deliberately deauthenticated), 205 CONNECTION_FAIL.
-//
-// Transmit power step-down. On this board the radio at full power (19.5 dBm) stops being
-// able to authenticate once the chip is hot: the router hears the board well (RSSI -62)
-// but every attempt ends in AUTH_EXPIRE, because the router cannot decode what the
-// board sends -- a distorted or supply-starved transmitter, the usual reason a lower
-// power setting fixes AUTH_EXPIRE on ESP32 boards. Measured 2026-11-10 after a 10-hour
-// outage, then reproduced twice under control at 76 C: every attempt at 19.5 dBm failed,
-// the first at 11 dBm connected in 3 s. The same fault hid the rescue AP: the driver
-// moves a soft-AP to the station's channel (11) on a connection attempt, and nothing the
-// hot board sends at full power on channel 11 is receivable -- the AP was visible on
-// channels 1 and 6 at the same power and temperature, and on channel 11 at 11 dBm.
-// So after WIFI_TXPOWER_STEPDOWN_AFTER consecutive authentication or handshake
-// timeouts the effective power drops: first straight to 11 dBm, the level measured to
-// work on the hot board (anything above it is the failure region, and walking down
-// through it 0.5 dB at a time would take hours at the slow retry cadence), then 8.5, 5
-// and 2 dBm if it has to -- at RSSI -62 even that has margin, and a connection at any
-// power beats retrying the same failure all night. A successful connection resets the
-// count. The step persists until reboot (it is an adaptation to this board right now,
-// not a setting); the configured value is untouched and is what the next boot starts
-// from. Each step is recorded in the netlog and shows in /json/info as wifi.txPower.
-static constexpr uint8_t WIFI_TXPOWER_STEPDOWN_AFTER = 3;
-static uint8_t wifiAuthTimeouts = 0;
-static unsigned long wifiLastFailure = 0;      // millis() of the last attempt that ended in a failure (not our own disconnect)
-static unsigned long wifiLastAssociated = 0;   // millis() of the last association; a failure older than this is history
-unsigned long wifiLastFailureMs()    { return wifiLastFailure; }
-unsigned long wifiLastAssociatedMs() { return wifiLastAssociated; }
-
-static uint8_t wifiTxPowerBelow(uint8_t p)
-{
-  static const uint8_t levels[] = { WIFI_POWER_11dBm, WIFI_POWER_8_5dBm, WIFI_POWER_5dBm, WIFI_POWER_2dBm };
-  for (uint8_t l : levels) if (l < p) return l;
-  return p;   // already at the floor
-}
-
-void wifiStaReasonEvent(arduino_event_id_t event, arduino_event_info_t info)
-{
-  if (event != ARDUINO_EVENT_WIFI_STA_DISCONNECTED) return;
-  const uint8_t reason = info.wifi_sta_disconnected.reason;
-  const int8_t  rssi   = info.wifi_sta_disconnected.rssi;
-  DEBUG_PRINTF_P(PSTR("WiFi-E: STA disconnected, reason %u, rssi %d @ %lus\n"), (unsigned)reason, (int)rssi, millis()/1000);
-  if (reason != WIFI_REASON_STA_LEAVING) netlogAdd(NL_STA_DISCONNECTED, reason, rssi);   // 36 is our own disconnect() at the start of every attempt
-  if (reason != WIFI_REASON_STA_LEAVING && reason != WIFI_REASON_ASSOC_LEAVE) wifiLastFailure = millis();   // a verdict on the attempt, not our own disconnect()
-
-  const bool authTimeout = reason == WIFI_REASON_AUTH_EXPIRE || reason == WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT || reason == WIFI_REASON_HANDSHAKE_TIMEOUT;
-  if (!authTimeout) return;   // NO_AP_FOUND, a deliberate leave etc. say nothing about our transmitter
-  if (++wifiAuthTimeouts < WIFI_TXPOWER_STEPDOWN_AFTER) return;
-  wifiAuthTimeouts = 0;
-  const uint8_t lower = wifiTxPowerBelow(txPowerEffective);
-  if (lower == txPowerEffective) return;
-  txPowerEffective = lower;
-  WiFi.setTxPower(wifi_power_t(lower));   // initConnection() applies it again on the next attempt
-  netlogAdd(NL_TX_POWER, lower);
-  DEBUG_PRINTF_P(PSTR("WiFi: repeated authentication timeouts, TX power stepped down to %u.\n"), (unsigned)lower);
-}
-#endif
-// AI: end
-
 void WiFiEvent(WiFiEvent_t event)
 {
   switch (event) {
@@ -710,39 +501,25 @@ void WiFiEvent(WiFiEvent_t event)
       break;
     case ARDUINO_EVENT_WIFI_STA_GOT_IP:
       DEBUG_PRINT(F("WiFi-E: WiFi IP address: ")); DEBUG_PRINTLN(WLEDNetwork.wifiIP());
-      wifiLinkWasUp = true;
-      wifiAuthTimeouts = 0;
       netlogAdd(NL_STA_GOT_IP, WLEDNetwork.wifiIP()[3]);
       break;
     case ARDUINO_EVENT_WIFI_STA_CONNECTED:
       // followed by IDLE and SCAN_DONE
       DEBUG_PRINTF_P(PSTR("WiFi-E: Connected! @ %lus\n"), millis()/1000);
-      wifiLastAssociated = millis();
       netlogAdd(NL_STA_CONNECTED);
       wasConnected = true;
       break;
     case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
-      // AI: below section was generated by an AI
-      // Only a WiFi connection that was actually up counts as a drop. wasConnected and
-      // interfacesInited are set by *any* interface, so with Ethernet up they are true
-      // while WiFi has never connected, and every failed attempt the stack reports
-      // (every ~2.5 s with the network absent) would force a reconnect and re-run the
-      // "newly connected" path -- rebinding mDNS/OTA, closing the rescue AP, and
-      // scanning continuously instead of backing off. Measured on hardware before the
-      // wifiLinkWasUp gate was added.
-      if (wifiLinkWasUp && wasConnected && interfacesInited) {
-        wifiLinkWasUp = false;
+    #ifndef WLED_AP_RESCUE   // a rescue build judges a WiFi drop by WiFi alone: wifi_monitor.cpp
+      if (wasConnected && interfacesInited) {
         DEBUG_PRINTF_P(PSTR("WiFi-E: Disconnected! @ %lus\n"), millis()/1000);
-        if (multiWiFi.size() > 1 && WiFi.scanComplete() >= 0) {
+        if (interfacesInited && multiWiFi.size() > 1 && WiFi.scanComplete() >= 0) {
           findWiFi(true); // reinit WiFi scan
+          forceReconnect = true;
         }
-        // Reconnect on the next loop rather than waiting out the timer in
-        // handleConnection(); a failing network cannot loop here because the gate above
-        // needs a successful connection first.
-        forceReconnect = true;
         interfacesInited = false;
       }
-      // AI: end
+    #endif
       break;
   #ifdef ARDUINO_ARCH_ESP32
     case ARDUINO_EVENT_WIFI_READY:
@@ -785,14 +562,12 @@ void WiFiEvent(WiFiEvent_t event)
       {
       DEBUG_PRINTLN(F("ETH-E: Connected"));
       netlogAdd(NL_ETH_CONNECTED);
-      // WiFi is deliberately left running: both interfaces serve traffic
-      // simultaneously on this build. See WLEDNetwork's per-interface accessors.
-      //
-      // Addressing is deliberately NOT applied here. handleEthernetAddressing() owns it
-      // and runs every loop, so it has usually already applied configuration by the time
-      // this event arrives. Applying again would not be harmless: config() with
-      // INADDR_NONE does dhcpc_stop() then dhcpc_start(), restarting the DHCP client and
-      // resetting lwIP's discover counter, which delays AUTOIP by a full retry.
+    #ifndef WLED_AP_RESCUE   // a rescue build keeps WiFi up alongside Ethernet: rescue_network.cpp
+      if (!apActive) {
+        WiFi.disconnect(true); // disable WiFi entirely
+      }
+    #endif
+      // Addressing is not applied here: handleEthernetAddressing() owns it (eth_addressing.cpp).
       char hostname[64] = {'\0'}; // any "hostname" within a Fully Qualified Domain Name (FQDN) must not exceed 63 characters
       getWLEDhostname(hostname, sizeof(hostname), true); // create DNS name based on mDNS name if set, or fall back to standard WLED server name
       ETH.setHostname(hostname);
@@ -801,13 +576,11 @@ void WiFiEvent(WiFiEvent_t event)
       }
     case ARDUINO_EVENT_ETH_GOT_IP:
       DEBUG_PRINT(F("ETH-E: IP address: ")); DEBUG_PRINTLN(WLEDNetwork.ethernetIP());
-      ethernetLinkLocalAssigned = (ETH.localIP()[0] == 169 && ETH.localIP()[1] == 254);
-      netlogAdd(NL_ETH_GOT_IP, ETH.localIP()[3], ethernetLinkLocalAssigned);
+      netlogAdd(NL_ETH_GOT_IP, ETH.localIP()[3], ethernetIsLinkLocal());
       break;
     case ARDUINO_EVENT_ETH_DISCONNECTED:
       DEBUG_PRINTLN(F("ETH-E: Disconnected"));
       netlogAdd(NL_ETH_DISCONNECTED);
-      ethernetLinkLocalAssigned = false; // re-applied on the next ETH_CONNECTED
       // This doesn't really affect ethernet per se,
       // as it's only configured once.  Rather, it
       // may be necessary to reconnect the WiFi when

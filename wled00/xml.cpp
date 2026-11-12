@@ -140,7 +140,7 @@ static void appendGPIOinfo(Print& settingsScript)
     }
   #endif
   #ifdef WLED_ETH_HAS_RMII
-   if (!isSpiEthernet(ethernetType)) {
+   if (isRmiiEthernet(ethernetType)) {
     for (unsigned p=0; p<WLED_ETH_RSVD_PINS_COUNT; p++) { settingsScript.printf("%d,",esp32_nonconfigurable_ethernet_pins[p].pin); }
     if (ethernetBoards[ethernetType].eth_power >= 0)    { settingsScript.printf("%d,",ethernetBoards[ethernetType].eth_power); }
     if (ethernetBoards[ethernetType].eth_mdc >= 0)      { settingsScript.printf("%d,",ethernetBoards[ethernetType].eth_mdc); }

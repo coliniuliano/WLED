@@ -37,8 +37,6 @@ struct NetlogStore {
 
 static RTC_NOINIT_ATTR NetlogStore netlog;
 static std::atomic_flag netlogLock = ATOMIC_FLAG_INIT;
-static uint8_t       lastDisconnectReason = 0;
-static unsigned long lastDisconnectMs = 0;
 
 void netlogInit()
 {
@@ -73,7 +71,6 @@ static bool netlogSuppress(uint8_t ev, uint8_t a, int8_t b)
 
 void netlogAdd(uint8_t ev, uint8_t a, int8_t b)
 {
-  if (ev == NL_STA_DISCONNECTED) { lastDisconnectReason = a; lastDisconnectMs = millis(); }
   while (netlogLock.test_and_set(std::memory_order_acquire)) taskYIELD();
   if (netlogSuppress(ev, a, b)) { netlogLock.clear(std::memory_order_release); return; }
   NetlogEntry& e = netlog.e[netlog.head];
@@ -89,9 +86,6 @@ void netlogClear()
   netlog.head = 0; netlog.count = 0;
   netlogLock.clear(std::memory_order_release);
 }
-
-uint8_t       wifiLastDisconnectReason() { return lastDisconnectReason; }
-unsigned long wifiLastDisconnectMs()     { return lastDisconnectMs; }
 
 static const char* resetReasonName(uint8_t r)
 {
@@ -142,8 +136,6 @@ void netlogPrint(Print& out)
     out.printf_P(PSTR("%3u   %3u:%02u:%02u.%03u  "), (unsigned)e.boot, (unsigned)(s / 3600), (unsigned)(s / 60 % 60), (unsigned)(s % 60), (unsigned)(e.ms % 1000));
     switch (e.ev) {
       case NL_BOOT:                   out.printf_P(PSTR("boot (%s reset)"), resetReasonName(e.a)); break;
-      case NL_STA_START:              out.print(F("WiFi started")); break;
-      case NL_STA_STOP:               out.print(F("WiFi stopped")); break;
       case NL_STA_CONNECTED:          out.print(F("WiFi associated")); break;
       case NL_STA_DISCONNECTED:       out.printf_P(PSTR("WiFi disconnected: reason %u (%s), rssi %d"), (unsigned)e.a, WiFi.STA.disconnectReasonName((wifi_err_reason_t)e.a), (int)e.b); break;
       case NL_STA_GOT_IP:             out.printf_P(PSTR("WiFi got IP (.%u)"), (unsigned)e.a); break;
@@ -155,10 +147,14 @@ void netlogPrint(Print& out)
       case NL_ETH_CONNECTED:          out.print(F("Ethernet link up")); break;
       case NL_ETH_GOT_IP:             out.printf_P(PSTR("Ethernet got IP (.%u%s)"), (unsigned)e.a, e.b ? ", link-local" : ""); break;
       case NL_ETH_DISCONNECTED:       out.print(F("Ethernet link down")); break;
-      case NL_INIT_CONNECTION:        out.printf_P(PSTR("WiFi connection attempt (AP %s)"), e.a ? "open" : "closed"); break;
+      case NL_INIT_CONNECTION:        out.printf_P(PSTR("WiFi connection attempt (AP %s)"), e.a ? "open" : "closed");
+                                      if (e.b > 0) out.printf_P(PSTR(", TX power %.1f dBm"), e.b / 4.0f);
+                                      break;
       case NL_AP_OPEN:                out.printf_P(PSTR("AP opened on channel %u (%s)"), (unsigned)e.a, apReasonName(e.b)); break;
       case NL_AP_CLOSE:               out.printf_P(PSTR("AP closed (%s)"), apReasonName(e.b)); break;
-      case NL_TX_POWER:               out.printf_P(PSTR("TX power stepped down to %u (%.1f dBm)"), (unsigned)e.a, e.a / 4.0f); break;
+      case NL_TX_POWER:               out.printf_P(PSTR("TX power set to %u (%.1f dBm)"), (unsigned)e.a, e.a / 4.0f);
+                                      if (e.b < 0) out.printf_P(PSTR(", router rssi %d"), (int)e.b);
+                                      break;
       case NL_SLEEP:                  out.print(e.a ? F("modem sleep on") : F("modem sleep off")); break;
       default:                        out.printf_P(PSTR("event %u (%u, %d)"), (unsigned)e.ev, (unsigned)e.a, (int)e.b); break;
     }

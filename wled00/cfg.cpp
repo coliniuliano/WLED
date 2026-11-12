@@ -193,7 +193,7 @@ bool deserializeConfig(JsonObject doc, bool fromFS) {
   #else
     txPower = min(max((int)txPower, (int)WIFI_POWER_2dBm), (int)WIFI_POWER_19_5dBm);
   #endif
-  txPowerEffective = txPower;
+  wifiTxPowerReset();
 #endif
 
   JsonObject hw = doc[F("hw")];
@@ -974,7 +974,7 @@ void serializeConfig(JsonObject root) {
     }
   #endif
   #ifdef WLED_ETH_HAS_RMII
-    if (!isSpiEthernet(ethernetType)) {
+    if (isRmiiEthernet(ethernetType)) {
       for (unsigned p=0; p<WLED_ETH_RSVD_PINS_COUNT; p++) pins.add(esp32_nonconfigurable_ethernet_pins[p].pin);
       if (ethernetBoards[ethernetType].eth_power>=0)     pins.add(ethernetBoards[ethernetType].eth_power);
       if (ethernetBoards[ethernetType].eth_mdc>=0)       pins.add(ethernetBoards[ethernetType].eth_mdc);

@@ -6,6 +6,9 @@
 // WiFi is retried, and when the radio may sleep. One place, one state machine; see
 // rescue_network.cpp for the rules. Everything here runs on the loop task.
 #ifdef WLED_AP_RESCUE
+#ifndef ARDUINO_ARCH_ESP32
+  #error "WLED_AP_RESCUE needs an ESP32: it relies on wifi_monitor.cpp and the arduino-esp32 WiFi driver."
+#endif
 void rescueNetworkHandle(unsigned long now, uint8_t apClients);   // from handleConnection(), every loop
 void rescueNetworkRequestAp(bool open);                            // {"wifi":{"ap":true|false}} on /json/state, and the Info panel button
 unsigned rescueNetworkApWindowSeconds();                           // for the UI: how long an on-demand AP stays open

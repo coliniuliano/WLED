@@ -25,10 +25,18 @@
   demand (over Ethernet, to hand a phone a path), {"wifi":{"ap":false}} closes it. "AP always" in the WiFi settings is honoured as
   an always-true rule 4. Every open and close is a netlog entry with its reason.
 
-  What stays elsewhere: initConnection() keeps the AP alive across reconnect attempts
-  (wled.cpp); the TX-power step-down is event-driven (network.cpp); the "newly connected"
-  block in handleConnection() still binds mDNS, OTA and friends when a link comes up.
-  The upstream AP/retry branches of handleConnection() are compiled out for this build.
+  WLED_AP_RESCUE also means WiFi stays up alongside Ethernet; upstream turns WiFi off
+  when Ethernet connects. Every place the flag changes shared code:
+    wled.cpp          initConnection() keeps the AP alive across reconnect attempts and
+                      leaves retries and radio sleep to this file; handleConnection()
+                      compiles out upstream's AP/retry branches, but its "newly connected"
+                      block still binds mDNS, OTA and friends when a link comes up.
+    network.cpp       WiFiEvent() neither turns WiFi off on Ethernet link-up nor judges
+                      WiFi drops itself.
+    wifi_monitor.cpp  WiFi drop detection per interface (event task). The automatic
+                      transmit power there has its own flag, WLED_ENABLE_AUTO_TX_POWER.
+    cfg.cpp, json.cpp the AP behaviour setting is restricted, and {"wifi":{"ap":...}} is
+                      routed here.
 */
 
 static constexpr unsigned long AP_WINDOW_MS            = 5UL * 60 * 1000;  // rule 2
@@ -109,7 +117,7 @@ unsigned rescueNetworkApWindowSeconds() { return AP_WINDOW_MS / 1000; }
 void rescueNetworkHandle(unsigned long now, uint8_t apClients)
 {
   const bool wifiUp         = WLEDNetwork.isWiFiUp();
-  const bool ethUp          = WLEDNetwork.isEthernetUp();
+  const bool ethUp          = WLEDNetwork.isEthernet();
   const bool wifiConfigured = WLED_WIFI_CONFIGURED;
   const bool always         = apBehavior == AP_BEHAVIOR_ALWAYS;
 

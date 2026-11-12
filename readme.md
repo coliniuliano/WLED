@@ -36,8 +36,9 @@ lwIP already solves this properly — RFC 3927 is built into ESP-IDF, and it sel
 a couple of unanswered discovers while leaving DHCP running, so a late lease still wins. It
 simply isn't switched on; no stock Arduino framework sets `CONFIG_LWIP_AUTOIP=y`. Since the
 capability is already there, `tools/autoip-build/` builds a framework with it enabled rather
-than reimplementing it worse. The firmware checks at compile time and steps out of lwIP's way
-when lwIP can do the job, so the same source is correct either way and none of this is needed
+than reimplementing it worse. The firmware's own hand-rolled fallback has since been removed
+(2026-11-11): link-local addressing is lwIP's job alone, and a stock-framework build gets
+DHCP or a static address only. The same source still builds either way, so none of this is needed
 for a normal build.
 
 **One patch to ESP-IDF, for a bug that custom build exposed.** `rmt_tx_wait_all_done()` logs
@@ -88,13 +89,24 @@ supply-starved PA, the usual reason a lower setting cures AUTH_EXPIRE on ESP32 b
 of the two it is would take a scope. Reproduced the same morning under control: rescue AP
 open to heat the chip to 76 °C, then the real network restored at 19.5 dBm — two attempts,
 two `AUTH_EXPIRE` at RSSI −64; power set to 11 dBm, next attempt associated in 3 s. Two
-changes: the board build now starts at 11 dBm
+changes: the board build now defaults to 11 dBm
 (`WLED_TX_POWER_DEFAULT=44` in `platformio.ini`; the WiFi settings page can still change
-it), and `network.cpp` steps power down one level after three consecutive authentication or
-handshake timeouts, as far down as 2 dBm if it has to (at RSSI −62 even that has margin),
-so a hot board at any setting finds one that works instead of retrying the same failure all
-night. A successful connection resets the count; the step lasts until reboot and the
-configured value is untouched. Effective power shows as `wifi.txPower` in `/json/info`.
+it), and `wifi_monitor.cpp` (build flag `WLED_ENABLE_AUTO_TX_POWER`) treats that setting as
+a ceiling and chooses the level in use itself. It first stepped power down one level per
+three authentication timeouts and stayed there, which could leave a board at 2 dBm for a
+failure that power had nothing to do with (a wrong password). Since 2026-11-11 the level
+comes from three inputs instead: the router's RSSI (the lowest level that should reach the
+router at about −71 dBm, which is 11 dBm at RSSI −62), the chip temperature (capped at
+11 dBm from 65 °C until it is back under 60 °C), and failures (three consecutive `AUTH_EXPIRE` move it down a level at
+a time to the lowest, then up to the ceiling, then round again, so it never settles on a
+level that does not connect). Only `AUTH_EXPIRE` counts: it is what the hot board produced,
+the router never answering at all, whereas a wrong password fails later as a handshake
+timeout (reason 15 or 204, per the ESP-IDF Wi-Fi guide) and leaves the power alone. The
+configured value is untouched and a settings save restarts the choice. Signal strength
+and temperature are reviewed every 10 s, connected or not. Effective power shows as
+`wifi.txPower` in `/json/info`, and every attempt and change is in `/netlog`.
+**The RSSI rule and the 65 °C threshold are derived from the two measurements above, not
+tested on hardware.**
 
 **The access point that was "open" with nothing on the air — same fault, seen from the
 other side.** For those ten hours the firmware reported the AP open and a phone next to the
@@ -206,7 +218,7 @@ match the ESP32-S3 SuperMini wiring. See `wled00/wled_ethernet.h`.
 | env | framework | use when |
 |---|---|---|
 | `esp32s3_w5500_autoip` | custom-built with `CONFIG_LWIP_AUTOIP=y` | **what the board runs.** lwIP does RFC 3927 itself; also the only one with a core dump partition |
-| `esp32s3_w5500` | stock (tasmota, as upstream WLED ships) | fallback that needs no custom framework; hand-rolled link-local, no `/coredump` |
+| `esp32s3_w5500` | stock (tasmota, as upstream WLED ships) | fallback that needs no custom framework; DHCP or static address only (no link-local), no `/coredump` |
 
 ```bash
 pio run -e esp32s3_w5500_autoip --target upload    # espota, target in platformio_override.ini
@@ -301,7 +313,9 @@ GPIO 1):
 - TX power vs. authentication, on the hot board (70 °C): four attempts at 19.5 dBm, each
   `AUTH_EXPIRE`; the first at 11 dBm associated in 3 s and had an IP in 9 s. Half an hour
   later, connected and sleeping, 56 °C. Reproduced twice more under control at 76 °C.
-- **The whole recovery chain, unattended**, on the hot board with 19.5 dBm configured:
+- **The whole recovery chain, unattended** (with the earlier one-way step-down; the
+  automatic transmit power that replaced it has not been through this test), on the hot
+  board with 19.5 dBm configured:
   attempts at 60 s, 90 s and 210 s each `AUTH_EXPIRE`; `TX power stepped down to 44`
   on the third; `WLED-AP` (moved to channel 11 by the driver, invisible at full power)
   back in the Mac's scan one second later at −51 dBm; next attempt at 330 s associated in

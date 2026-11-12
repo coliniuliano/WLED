@@ -128,7 +128,7 @@ void handleSettingsSet(AsyncWebServerRequest *request, byte subPage)
     #else
       txPower = min(max((int)tx, (int)WIFI_POWER_2dBm), (int)WIFI_POWER_19_5dBm);
     #endif
-    txPowerEffective = txPower;
+    wifiTxPowerReset();
     #endif
 
     force802_3g = request->hasArg(F("FG"));
@@ -187,7 +187,7 @@ void handleSettingsSet(AsyncWebServerRequest *request, byte subPage)
       // The PHY is only brought up once, so changing its type needs a restart
       DEBUG_PRINTLN(F("ETH: type changed, reboot required"));
       doReboot = true;
-    } else if (WLEDNetwork.isEthernetUp() &&
+    } else if (WLEDNetwork.isEthernet() &&
                (oldEthIP != ethernetStaticIP || oldEthGW != ethernetStaticGW || oldEthSN != ethernetStaticSN)) {
       // Only the addressing changed, so re-apply it in place rather than rebooting
       DEBUG_PRINTLN(F("ETH: reconfiguring address"));

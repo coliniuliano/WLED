@@ -213,7 +213,7 @@ void notify(byte callMode, bool followUp)
 #if defined(ARDUINO_ARCH_ESP32) && defined(WLED_USE_ETHERNET)
     // Sync traffic goes out every active interface, so peers on either network see it
     bool sentOnAny = false;
-    if (WLEDNetwork.isEthernetUp()) {
+    if (WLEDNetwork.isEthernet()) {
       sendNotifyBroadcast(directedBroadcast(WLEDNetwork.ethernetIP(), WLEDNetwork.ethernetSubnetMask()), udpOut);
       sentOnAny = true;
     }
@@ -768,7 +768,7 @@ void sendSysInfoUDP()
 
 #if defined(ARDUINO_ARCH_ESP32) && defined(WLED_USE_ETHERNET)
   bool sentOnAny = false;
-  if (WLEDNetwork.isEthernetUp()) { sendSysInfoUDPForIP(WLEDNetwork.ethernetIP()); sentOnAny = true; }
+  if (WLEDNetwork.isEthernet()) { sendSysInfoUDPForIP(WLEDNetwork.ethernetIP()); sentOnAny = true; }
   if (WLEDNetwork.isWiFiUp())     { sendSysInfoUDPForIP(WLEDNetwork.wifiIP());     sentOnAny = true; }
   if (sentOnAny) return;
 #endif

@@ -975,7 +975,7 @@ void serializeInfo(JsonObject root)
 
   // With both interfaces up, "ip" only carries whichever one has routing priority.
   // Report each active interface separately so clients can pick a reachable one.
-  if (WLEDNetwork.isEthernetUp()) {
+  if (WLEDNetwork.isEthernet()) {
     IPAddress ethIP = WLEDNetwork.ethernetIP();
     sprintf(s, "%d.%d.%d.%d", ethIP[0], ethIP[1], ethIP[2], ethIP[3]);
     root[F("eth_ip")] = s;

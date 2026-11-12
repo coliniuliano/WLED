@@ -316,20 +316,10 @@ void espNowReceiveCB(uint8_t* address, uint8_t* data, uint8_t len, signed int rs
 
 //network.cpp
 bool initEthernet(); // result is informational
-#if defined(ARDUINO_ARCH_ESP32) && defined(WLED_USE_ETHERNET)
-void applyEthernetLinkLocal();    // RFC 3927 APIPA address, used in place of DHCP
-void applyEthernetConfig();       // static IP, legacy WiFi-slot-0 IP, DHCP or link-local
-void handleEthernetAddressing();  // drives the DHCP->link-local fallback; call from the main loop
-#endif
 int  getSignalQuality(int rssi);
 void fillMAC2Str(char *str, const uint8_t *mac);
 void fillStr2MAC(uint8_t *mac, const char *str);
 int  findWiFi(bool doScan = false);
-#ifdef ARDUINO_ARCH_ESP32
-void wifiStaReasonEvent(arduino_event_id_t event, arduino_event_info_t info);
-unsigned long wifiLastFailureMs();      // when the last WiFi attempt failed; rescue_network.cpp paces retries from it
-unsigned long wifiLastAssociatedMs();   // when the station last associated (DHCP may still be running)
-#endif
 bool isWiFiConfigured();
 void installIPv6RABlocker();
 void WiFiEvent(WiFiEvent_t event);

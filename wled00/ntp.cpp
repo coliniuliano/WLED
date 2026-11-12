@@ -236,7 +236,7 @@ void handleNetworkTime()
               // no DNS server -- a link-local Ethernet rig -- lookups fail forever, and
               // tearing the station (and with it the rescue AP) down every 30 minutes
               // fixes nothing. See WLED_AP_RESCUE in cfg.cpp.
-              if (offMode && !WLEDNetwork.isEthernetUp()) forceReconnect = true; // do not disturb while LEDs are running
+              if (offMode && !WLEDNetwork.isEthernet()) forceReconnect = true; // do not disturb while LEDs are running
               ntpDNSlookup.reset();
             } else {
               // Retry

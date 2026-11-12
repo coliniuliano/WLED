@@ -107,7 +107,7 @@ bool WLEDNetworkClass::isEthernet()
 IPAddress WLEDNetworkClass::ethernetIP()
 {
 #if defined(ARDUINO_ARCH_ESP32) && defined(WLED_USE_ETHERNET)
-  if (ETH.linkUp() && ETH.localIP()[0] != 0) return ETH.localIP();
+  if (isEthernet()) return ETH.localIP();
 #endif
   return INADDR_NONE;
 }
@@ -115,7 +115,7 @@ IPAddress WLEDNetworkClass::ethernetIP()
 IPAddress WLEDNetworkClass::ethernetSubnetMask()
 {
 #if defined(ARDUINO_ARCH_ESP32) && defined(WLED_USE_ETHERNET)
-  if (ETH.linkUp() && ETH.localIP()[0] != 0) return ETH.subnetMask();
+  if (isEthernet()) return ETH.subnetMask();
 #endif
   return INADDR_NONE;
 }
@@ -123,14 +123,9 @@ IPAddress WLEDNetworkClass::ethernetSubnetMask()
 IPAddress WLEDNetworkClass::ethernetGatewayIP()
 {
 #if defined(ARDUINO_ARCH_ESP32) && defined(WLED_USE_ETHERNET)
-  if (ETH.linkUp() && ETH.localIP()[0] != 0) return ETH.gatewayIP();
+  if (isEthernet()) return ETH.gatewayIP();
 #endif
   return INADDR_NONE;
-}
-
-bool WLEDNetworkClass::isEthernetUp()
-{
-  return isEthernet();
 }
 
 IPAddress WLEDNetworkClass::wifiIP()
