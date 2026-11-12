@@ -83,10 +83,19 @@ podman run --rm $SEL $PV wled-autoip-builder bash -lc \
 podman run --rm $SEL $PV -v "$HOME/.platformio/custom":/out \
   -v "$PWD/tools/autoip-build":/scripts:ro \
   wled-autoip-builder bash /scripts/package.sh esp32s3
+
+# 6. patch and swap in the mDNS library (see patches/README.md, "The mDNS patch")
+podman run --rm $SEL $PV -v "$HOME/.platformio/custom":/out \
+  -v "$PWD/tools/autoip-build":/scripts:ro \
+  wled-autoip-builder bash /scripts/patch-mdns.sh esp32s3
 ```
 
-Then `pio run -e esp32s3_w5500_autoip`. The environment already points at the packages via
-`symlink://${sysenv.HOME}/.platformio/custom/...`, so there is nothing else to configure.
+Then `PLATFORMIO_BUILD_CACHE_DIR="$(mktemp -d)" pio run -e esp32s3_w5500_autoip`. The
+environment already points at the packages via
+`symlink://${sysenv.HOME}/.platformio/custom/...`, so there is nothing else to configure. The
+empty build cache matters after any framework change: the project's `build_cache_dir` does not
+notice a changed framework library and would hand back the previously linked firmware
+(patches/README.md explains).
 
 Sanity checks:
 

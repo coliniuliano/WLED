@@ -1,0 +1,85 @@
+--- a/mdns_send.c	2026-11-12 15:21:07.848452731 +0000
++++ b/mdns_send.c	2026-11-12 15:21:07.849285448 +0000
+@@ -1199,6 +1199,67 @@
+     record_length += part_length;
+     return record_length;
+ }
++
++/* WLED patch (WLED tools/autoip-build/patches/mdns): negative AAAA responses.
++ *
++ * With no IPv6 address to give, this library used to answer an AAAA query for its own host
++ * with nothing at all. A dual-stack resolver then waits out its timeout -- ~5 s per lookup in
++ * macOS getaddrinfo() on any machine with a routable IPv6 address, e.g. one running
++ * Tailscale. RFC 6762 section 6.1: a responder that owns a name but not the requested type
++ * asserts that with an NSEC record listing the types it does have. Here that is A only.
++ */
++#ifndef MDNS_TYPE_NSEC
++#define MDNS_TYPE_NSEC 0x002F
++#endif
++
++static uint16_t append_nsec_a_only_record(uint8_t *packet, uint16_t *index, const char *hostname, bool flush)
++{
++    const char *str[2] = { hostname, MDNS_UTILS_DEFAULT_DOMAIN };
++    uint16_t record_length = 0;
++    uint16_t part_length;
++
++    if (mdns_utils_str_null_or_empty(str[0])) {
++        return 0;
++    }
++    part_length = append_fqdn(packet, index, str, 2, MDNS_MAX_PACKET_SIZE);
++    if (!part_length) {
++        return 0;
++    }
++    record_length += part_length;
++
++    // type, class, TTL and a placeholder RDLENGTH (append_type() only knows the record types it answers with)
++    if ((*index + 10) >= MDNS_MAX_PACKET_SIZE) {
++        return 0;
++    }
++    mdns_utils_append_u16(packet, index, MDNS_TYPE_NSEC);
++    mdns_utils_append_u16(packet, index, flush ? MDNS_CLASS_IN_FLUSH_CACHE : MDNS_CLASS_IN);
++    append_u32(packet, index, MDNS_ANSWER_AAAA_TTL);
++    uint16_t data_len_location = *index;
++    mdns_utils_append_u16(packet, index, 0);
++    record_length += 10;
++
++    // RDATA: Next Domain Name = the record's own name (RFC 6762 section 6.1; it compresses to a
++    // two-byte pointer), then a type bitmap of window 0, one byte, with only type 1 (A) set.
++    uint16_t rdata_start = *index;
++    if (!append_fqdn(packet, index, str, 2, MDNS_MAX_PACKET_SIZE) || (*index + 3) >= MDNS_MAX_PACKET_SIZE) {
++        return 0;
++    }
++    mdns_utils_append_u8(packet, index, 0x00);
++    mdns_utils_append_u8(packet, index, 0x01);
++    mdns_utils_append_u8(packet, index, 0x40);
++    set_u16(packet, data_len_location, *index - rdata_start);
++    record_length += *index - rdata_start;
++    return record_length;
++}
++
++// Our own host has no IPv6 address on this interface: say so instead of staying silent.
++static uint8_t append_self_no_aaaa(uint8_t *packet, uint16_t *index, mdns_out_answer_t *answer)
++{
++    if (answer->bye) {
++        return 0;   // a goodbye withdraws records; there is no AAAA record to withdraw
++    }
++    return append_nsec_a_only_record(packet, index, mdns_priv_get_global_hostname(), answer->flush) > 0;
++}
+ #endif
+ 
+ static uint8_t append_host_answer(uint8_t *packet, uint16_t *index, mdns_host_item_t *host,
+@@ -1308,10 +1369,13 @@
+             uint8_t count = 0;
+             if (!mdns_priv_if_ready(tcpip_if, MDNS_IP_PROTOCOL_V6) && !mdns_priv_pcb_is_duplicate(tcpip_if,
+                                                                                                   MDNS_IP_PROTOCOL_V6)) {
+-                return 0;
++                return append_self_no_aaaa(packet, index, answer);   // WLED patch: was "return 0"
+             }
+             count = esp_netif_get_all_ip6(mdns_priv_get_esp_netif(tcpip_if), if_ip6s);
+             assert(count <= NETIF_IPV6_MAX_NUMS);
++            if (count == 0) {
++                return append_self_no_aaaa(packet, index, answer);   // WLED patch
++            }
+             for (int i = 0; i < count; i++) {
+                 if (mdns_utils_ipv6_address_is_zero(if_ip6s[i])) {
+                     return 0;
