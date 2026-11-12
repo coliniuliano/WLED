@@ -61,7 +61,7 @@ unsigned long wifiLastDisconnectMs()     { return lastDisconnectMs; }
 // 20 dB above what the slowest rates need, which leaves room for the estimate to be wrong.
 static constexpr int TXPOWER_TARGET_AT_ROUTER_DBM = -71;
 static constexpr int TXPOWER_ROUTER_DBM           = 20;    // assumed; routers do not report it
-static constexpr int TXPOWER_RSSI_HYSTERESIS_DB   = 3;     // RSSI wanders by a few dB; smaller moves are ignored
+static constexpr int TXPOWER_RSSI_HYSTERESIS_DB   = 3;     // a lower level must still suffice with the signal this much worse
 // Between the two temperatures measured: full power worked at 55 C and failed at 70 C.
 static constexpr float   TXPOWER_HOT_C            = 65.0f;
 static constexpr float   TXPOWER_COOL_C           = 60.0f;
@@ -111,11 +111,12 @@ static int txPowerIndexFor(int level, int top)
 }
 
 // The level signal strength and temperature call for, before the failure search.
-static int txPowerEstimate(int top)
+// worseByDb: plan for a signal that many dB weaker than measured (hysteresis, see txPowerUpdate()).
+static int txPowerEstimate(int top, int worseByDb = 0)
 {
   int index = top;   // no RSSI yet (boot, or settings just saved): the ceiling
   if (routerRssi < 0) {
-    const int pathLoss = TXPOWER_ROUTER_DBM - routerRssi;
+    const int pathLoss = TXPOWER_ROUTER_DBM - (routerRssi - worseByDb);
     index = txPowerIndexFor((TXPOWER_TARGET_AT_ROUTER_DBM + pathLoss) * 4, top);
   }
   #ifdef WLED_HAS_SOC_TEMPERATURE
@@ -144,7 +145,20 @@ static void txPowerUpdate(bool searchFurther)
   const int top      = txPowerTopIndex();
   const int estimate = txPowerEstimate(top);
   if (searchFurther) searchOffset = txPowerNextOffset(estimate, top);
-  const uint8_t level = txPowerAt(constrain(estimate + searchOffset, 0, top), top);
+  int index = constrain(estimate + searchOffset, 0, top);
+  // Hysteresis. More power applies at once; less only if the lower level would still do
+  // with the signal TXPOWER_RSSI_HYSTERESIS_DB worse than measured. Without it, RSSI
+  // wandering across a level boundary (-55 / -58 dBm on the bench) flipped the level on
+  // almost every review. Temperature and the failure search are not held back: the cap
+  // applies to both estimates, and a search step skips this.
+  if (txPowerNow && !searchFurther) {
+    const int current = txPowerIndexFor(txPowerNow, top);
+    if (index < current) {
+      const int cautious = constrain(txPowerEstimate(top, TXPOWER_RSSI_HYSTERESIS_DB) + searchOffset, 0, top);
+      index = max(index, min(cautious, current));
+    }
+  }
+  const uint8_t level = txPowerAt(index, top);
   if (level == txPowerNow) return;
   if (txPowerNow == 0 && level == txPower) return;   // nothing known and the answer is the ceiling: wifiTxPower() already says so
   txPowerNow = level;
@@ -153,12 +167,12 @@ static void txPowerUpdate(bool searchFurther)
   DEBUG_PRINTF_P(PSTR("WiFi: TX power set to %u (rssi %d, hot %d, search offset %d).\n"), (unsigned)level, (int)routerRssi, (int)chipHot, (int)searchOffset);
 }
 
-// Take a new RSSI reading as the basis for the level, unless it is noise around the
-// reading the level is already based on.
+// Take a new RSSI reading as the basis for the level. Noise is handled by the hysteresis in
+// txPowerUpdate(), not here.
 static void txPowerNoteRssi(int rssi)
 {
   if (rssi >= 0 || rssi <= -120) return;   // the driver reports 0 or a floor value when it has none
-  if (routerRssi == 0 || abs(rssi - routerRssi) >= TXPOWER_RSSI_HYSTERESIS_DB) routerRssi = rssi;
+  routerRssi = rssi;
 }
 
 uint8_t wifiTxPower()
